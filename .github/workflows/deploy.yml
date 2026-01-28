@@ -1,0 +1,33 @@
+name: Bot Deployment
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: [self-hosted]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t coincheatkey-bot:latest .
+
+      - name: Stop and remove previous container
+        run: |
+          docker stop coincheatkey-bot || true
+          docker rm coincheatkey-bot || true
+
+      - name: Run new container
+        run: |
+          docker run -d --name coincheatkey-bot \
+          --restart unless-stopped \
+          -e BINANCE_API_KEY=${{ secrets.BINANCE_API_KEY }} \
+          -e BINANCE_SECRET_KEY=${{ secrets.BINANCE_SECRET_KEY }} \
+          -e TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }} \
+          -e TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }} \
+          coincheatkey-bot:latest
