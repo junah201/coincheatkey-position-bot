@@ -112,10 +112,9 @@ class BinanceWebSocket(ExchangeWebSocket):
             self.flush_tasks[symbol] = asyncio.create_task(self._flush_buffer(symbol))
 
     async def _flush_buffer(self, symbol):
-        """1초 뒤에 모아서 알림 전송"""
+        """0.5초 대기 후 데이터를 취합해서 알림 전송"""
 
-        # ⏳ 1초 대기: 이 사이에 ACCOUNT_UPDATE가 도착해서 self.active_positions를 갱신해줌!
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
         orders = self.msg_buffer.pop(symbol, [])
         if symbol in self.flush_tasks:
@@ -125,7 +124,7 @@ class BinanceWebSocket(ExchangeWebSocket):
 
         # --- 데이터 계산 ---
         total_qty = Decimal("0")
-        total_value = Decimal("0")
+        total_val = Decimal("0")
         total_pnl = Decimal("0")
 
         side = orders[0]["S"]
@@ -137,46 +136,71 @@ class BinanceWebSocket(ExchangeWebSocket):
             rp = Decimal(str(o.get("rp", "0")))
 
             total_qty += q
-            total_value += p * q
+            total_val += p * q
             total_pnl += rp
 
-        # 이번 체결들의 평균 가격
-        trade_avg_price = total_value / total_qty if total_qty > 0 else Decimal("0")
+        exec_avg_price = total_val / total_qty if total_qty > 0 else Decimal("0")
 
-        # 📌 [핵심] 갱신된 지갑 정보 가져오기 (최신 평단가)
         wallet = self.active_positions.get(
             symbol, {"amt": Decimal("0"), "price": Decimal("0")}
         )
-        final_entry_price = wallet["price"]
-        final_amt = wallet["amt"]
+        final_ep = wallet["price"]
+        final_amt = abs(wallet["amt"])
 
-        # --- 알림 출력 ---
-
-        # Case A: 청산 (수익/손실 확정)
-        if total_pnl != Decimal("0") or is_reduce:
-            event = "익절" if total_pnl > 0 else "손절" if total_pnl < 0 else "청산"
-            emoji = "💰" if total_pnl > 0 else "💧" if total_pnl < 0 else "⚖️"
-
-            print(f"{emoji} [{event}] {symbol} {side} (합산)")
-            print(f" - 수익금: ${total_pnl:,.2f}")
-            print(f" - 매도량: {total_qty:,.4f} (평단: {trade_avg_price:,.4f})")
-
-            if final_amt != Decimal("0"):
-                print(f" ✨ 남은 물량 평단: {final_entry_price:,.4f}")
-            else:
-                print(" ✨ 포지션 완전 종료")
-
-        # Case B: 진입 (신규/물타기)
+        if total_pnl == 0:
+            pos_type = "롱" if side == "BUY" else "숏"
+            color = "🟢" if side == "BUY" else "🔴"
         else:
-            pos_side = "롱" if side == "BUY" else "숏"
-            print(f"🚀 [진입/추가] {symbol} {pos_side} (합산)")
-            print(f" - 체결가: {trade_avg_price:,.4f}")
-            print(f" - 수량: {total_qty:,.4f}")
+            pos_type = "롱" if side == "SELL" else "숏"
+            color = ""
 
-            # 여기서 물타기가 반영된 최종 평단가가 나옴!
-            print(f" ✨ 최종 평단: {final_entry_price:,.4f}")
+        msg = ""
 
+        # =========================================================
+        # Case A: 청산 (익절 / 손절)
+        # =========================================================
+        if total_pnl != Decimal("0") or is_reduce:
+            if total_pnl > 0:
+                icon = "💰"
+                pnl_type = "익절"
+            elif total_pnl < 0:
+                icon = "💧"
+                pnl_type = "손절"
+            else:
+                icon = "⚖️"
+                pnl_type = "청산"
+
+            # 📌 [수정됨] 수량 표시 로직 변경
+            if final_amt < Decimal("0.00001"):
+                # 전량 청산일 때
+                trade_type = f"{pnl_type}"
+                detail_txt = f"/ 수량: {total_qty:,.4f} (전량 청산)"
+            else:
+                # 부분 청산일 때 (요청하신 부분!)
+                trade_type = f"부분 {pnl_type}"
+                detail_txt = f"/ 수량: {total_qty:,.4f} / 남은수량: {final_amt:,.4f}"
+
+            # 예: 💰 [부분 익절] RIVERUSDT 롱 / 평단: xxx / 수량: 1.5 / 남은수량: 2.7
+            msg = f"{icon} [{trade_type}] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} {detail_txt}\n"
+            msg += f"확정손익: ${total_pnl:,.2f}"
+
+        # =========================================================
+        # Case B: 진입 (신규 / 추가 매수)
+        # =========================================================
+        else:
+            prev_amt = final_amt - total_qty
+
+            if prev_amt < Decimal("0.00001"):
+                # 신규 진입
+                msg = f"{color}[진입] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} / 수량: {total_qty:,.4f}"
+            else:
+                # 추가 매수
+                msg = f"{color}[추가매수] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} / 수량: {total_qty:,.4f}\n"
+                msg += f"➡️ 최종평단: {final_ep:,.4f} / 누적수량: {final_amt:,.4f}"
+
+        print(msg)
         print("-" * 30)
+        asyncio.create_task(send_telegram_message(msg))
 
     async def stop(self):
         if self.client:
