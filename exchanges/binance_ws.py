@@ -19,180 +19,165 @@ class BinanceWebSocket(ExchangeWebSocket):
         )
         self.client = None
         self.bm = None
-        self.active_positions = {}
-        self.msg_buffer = defaultdict(list)
 
-    async def _sync_initial_positions(self):
-        """초기 포지션 동기화"""
-        try:
-            print("🔄 바이낸스 초기 포지션 동기화 중...")
-            account_info = await self.client.futures_account()
-
-            for position in account_info["positions"]:
-                symbol = position["symbol"]
-                # 📌 API에서 오는 문자열을 바로 Decimal로 변환
-                amt = Decimal(str(position["positionAmt"]))
-
-                if amt != Decimal("0"):
-                    self.active_positions[symbol] = amt
-                    print(f"   ✅ 보유 확인: {symbol} ({amt}개)")
-
-            print("🆗 바이낸스 포지션 동기화 완료!")
-
-        except Exception as e:
-            logging.error(f"바이낸스 초기 포지션 동기화 실패: {e}")
-
-    async def start(self):
-        """
-        비동기 방식(BinanceSocketManager)으로 웹소켓 연결
-        """
-        # 1. AsyncClient 생성 (await 필요)
-        self.client = await AsyncClient.create(
-            api_key=self.api_key, api_secret=self.secret_key
+        # 📌 [지갑] 실시간 포지션 정보 (수량, 평단가) 저장소
+        # 구조: { "BTCUSDT": { "amt": Decimal("0.5"), "price": Decimal("60100.5") } }
+        self.active_positions = defaultdict(
+            lambda: {"amt": Decimal("0"), "price": Decimal("0")}
         )
 
+        self.msg_buffer = defaultdict(list)
+        self.flush_tasks = {}
+
+    async def _sync_initial_positions(self):
+        """봇 시작 시 현재 포지션 상태 동기화"""
+        try:
+            print("🔄 초기 포지션 정보 로딩 중...")
+            account_info = await self.client.futures_account()
+            for position in account_info["positions"]:
+                symbol = position["symbol"]
+                amt = Decimal(str(position["positionAmt"]))
+                ep = Decimal(str(position["entryPrice"]))
+
+                if amt != Decimal("0"):
+                    self.active_positions[symbol] = {"amt": amt, "price": ep}
+                    print(f"   ✅ 보유중: {symbol} (평단: {ep})")
+            print("🆗 동기화 완료!")
+        except Exception as e:
+            logging.error(f"동기화 실패: {e}")
+
+    async def start(self):
+        self.client = await AsyncClient.create(self.api_key, self.secret_key)
         await self._sync_initial_positions()
 
-        # 2. 소켓 매니저 초기화
         self.bm = BinanceSocketManager(self.client)
-
-        # 3. 선물(Futures) 유저 데이터 소켓 가져오기
         ts = self.bm.futures_user_socket()
 
-        print("🤖 바이낸스 웹소켓(Async) 연결 성공! 데이터 수신 대기 중...")
+        print("🤖 바이낸스 봇 연결 완료. 감시 시작...")
 
-        # 4. 소켓 연결 및 메시지 루프 (async with)
         async with ts as tscm:
             while True:
                 try:
-                    # 메시지 수신 대기 (여기서 멈춰 있다가 메시지 오면 실행됨)
                     res = await tscm.recv()
-
-                    # 메시지 처리 핸들러 호출
                     self._handle_socket_message(res)
-
                 except Exception as e:
-                    logging.error(f"웹소켓 수신 중 에러: {e}")
-                    # 에러 발생 시 잠시 대기 후 재시도 or 루프 유지
+                    logging.error(f"소켓 에러: {e}")
                     await asyncio.sleep(1)
 
-    def _update_wallet(self, msg):
-        """ACCOUNT_UPDATE 이벤트 처리: 지갑 정보 최신화"""
-        data = msg.get("a", {})
-        for p in data.get("P", []):
-            symbol = p["s"]  # Symbol
-            amt = Decimal(str(p["pa"]))  # 수량
-            ep = Decimal(str(p["ep"]))  # 평단가
-
-            self.active_positions[symbol] = {"amt": amt, "price": ep}
-
     def _handle_socket_message(self, msg):
-        """
-        메시지 파싱 및 로직 분기
-        """
         try:
+            # 전체 로그 저장 (디버깅용)
             with open("b.out", "a", encoding="utf-8") as f:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n\n\n")
 
             event_type = msg.get("e")
 
-            if event_type == "error":
-                logging.error(f"바이낸스 WebSocket Error: {msg}")
-                return
-
+            # 📌 1. [실시간 업데이트] 계좌 변동이 오면 내 지갑(메모리)을 즉시 갱신
             if event_type == "ACCOUNT_UPDATE":
                 self._update_wallet(msg)
 
-            if event_type == "ORDER_TRADE_UPDATE":
-                self._process_order_update(msg)
+            # 📌 2. [알림 대기] 주문 체결이 오면 버퍼에 넣고 타이머 시작
+            elif event_type == "ORDER_TRADE_UPDATE":
+                self._buffer_order(msg)
 
         except Exception as e:
-            logging.error(f"메시지 처리 로직 에러: {e}")
+            logging.error(f"처리 중 에러: {e}")
 
-    def _process_order_update(self, msg):
-        """주문 데이터를 버퍼에 넣고 타이머를 시작하는 함수"""
+    def _update_wallet(self, msg):
+        """ACCOUNT_UPDATE 이벤트 처리: 지갑 정보 최신화"""
+        data = msg.get("a", {})
+        for p in data.get("P", []):
+            symbol = p["s"]
+            # 📌 바이낸스가 계산해준 '최신 평단가'와 '수량'을 저장
+            amt = Decimal(str(p["pa"]))
+            ep = Decimal(str(p["ep"]))
+
+            self.active_positions[symbol] = {"amt": amt, "price": ep}
+
+    def _buffer_order(self, msg):
+        """ORDER_TRADE_UPDATE 이벤트 처리"""
         order_data = msg.get("o", {})
 
-        # 필터링 (체결된 것만)
+        # 체결된 것만 처리 (FILLED, PARTIALLY_FILLED)
         if order_data.get("X") not in ["FILLED", "PARTIALLY_FILLED"]:
             return
         if order_data.get("x") != "TRADE":
             return
 
         symbol = order_data.get("s")
-
-        # 1. 버퍼에 데이터 추가 (보내지 않고 저장만 함)
         self.msg_buffer[symbol].append(order_data)
 
-        # 2. 해당 코인에 대해 이미 돌아가는 타이머가 없다면, 새 타이머 시작
+        # 타이머가 없으면 시작
         if symbol not in self.flush_tasks:
             self.flush_tasks[symbol] = asyncio.create_task(self._flush_buffer(symbol))
 
     async def _flush_buffer(self, symbol):
-        """
-        1초 대기 후 데이터를 취합해서 알림을 보내는 함수 (Decimal 적용)
-        """
-        # 1초 버퍼링
+        """1초 뒤에 모아서 알림 전송"""
+
+        # ⏳ 1초 대기: 이 사이에 ACCOUNT_UPDATE가 도착해서 self.active_positions를 갱신해줌!
         await asyncio.sleep(1)
 
         orders = self.msg_buffer.pop(symbol, [])
         if symbol in self.flush_tasks:
             del self.flush_tasks[symbol]
-
         if not orders:
             return
 
+        # --- 데이터 계산 ---
         total_qty = Decimal("0")
         total_value = Decimal("0")
         total_pnl = Decimal("0")
 
         side = orders[0]["S"]
-        is_reduce_only = any(o.get("R", False) for o in orders)
+        is_reduce = any(o.get("R", False) for o in orders)
 
         for o in orders:
-            q = Decimal(str(o.get("l", "0")))  # 체결 수량
-            p = Decimal(str(o.get("ap", "0")))  # 체결 가격
-            rp = Decimal(str(o.get("rp", "0")))  # 실현 손익
+            q = Decimal(str(o.get("l", "0")))
+            p = Decimal(str(o.get("ap", "0")))
+            rp = Decimal(str(o.get("rp", "0")))
 
             total_qty += q
             total_value += p * q
             total_pnl += rp
 
-        # 평균 체결가 계산 (ZeroDivisionError 방지)
-        if total_qty > Decimal("0"):
-            avg_price = total_value / total_qty
-        else:
-            avg_price = Decimal("0")
+        # 이번 체결들의 평균 가격
+        trade_avg_price = total_value / total_qty if total_qty > 0 else Decimal("0")
 
-        # --- 메시지 생성 및 전송 ---
-        # Case A: 청산 (익절/손절) - PnL이 0이 아니거나 ReduceOnly인 경우
-        if total_pnl != Decimal("0") or is_reduce_only:
-            event_type = "청산"
-            emoji = "⚖️"
+        # 📌 [핵심] 갱신된 지갑 정보 가져오기 (최신 평단가)
+        wallet = self.active_positions.get(
+            symbol, {"amt": Decimal("0"), "price": Decimal("0")}
+        )
+        final_entry_price = wallet["price"]
+        final_amt = wallet["amt"]
 
-            if total_pnl > Decimal("0"):
-                event_type = "익절"
-                emoji = "💰"
-            elif total_pnl < Decimal("0"):
-                event_type = "손절"
-                emoji = "💧"
+        # --- 알림 출력 ---
 
-            print(f"{emoji} [{event_type}] {symbol} {side} (합산)")
-            print(f" - 총 수량: {total_qty:,.4f}")
-            print(f" - 평균 매도가: {avg_price:,.4f}")
-            print(f" - 확정 손익: ${total_pnl:,.2f}")
+        # Case A: 청산 (수익/손실 확정)
+        if total_pnl != Decimal("0") or is_reduce:
+            event = "익절" if total_pnl > 0 else "손절" if total_pnl < 0 else "청산"
+            emoji = "💰" if total_pnl > 0 else "💧" if total_pnl < 0 else "⚖️"
+
+            print(f"{emoji} [{event}] {symbol} {side} (합산)")
+            print(f" - 수익금: ${total_pnl:,.2f}")
+            print(f" - 매도량: {total_qty:,.4f} (평단: {trade_avg_price:,.4f})")
+
+            if final_amt != Decimal("0"):
+                print(f" ✨ 남은 물량 평단: {final_entry_price:,.4f}")
+            else:
+                print(" ✨ 포지션 완전 종료")
 
         # Case B: 진입 (신규/물타기)
         else:
-            position_side = "롱" if side == "BUY" else "숏"
+            pos_side = "롱" if side == "BUY" else "숏"
+            print(f"🚀 [진입/추가] {symbol} {pos_side} (합산)")
+            print(f" - 체결가: {trade_avg_price:,.4f}")
+            print(f" - 수량: {total_qty:,.4f}")
 
-            print(f"🚀 [포지션 진입/추가] {symbol} {position_side} (합산)")
-            print(f" - 평균 진입가: {avg_price:,.4f}")
-            print(f" - 총 수량: {total_qty:,.4f}")
+            # 여기서 물타기가 반영된 최종 평단가가 나옴!
+            print(f" ✨ 최종 평단: {final_entry_price:,.4f}")
 
         print("-" * 30)
 
     async def stop(self):
-        """종료 처리"""
         if self.client:
             await self.client.close_connection()
