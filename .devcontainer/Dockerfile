@@ -3,7 +3,7 @@ FROM python:3.14-slim
 # Timezone
 ENV TZ=Asia/Seoul
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-#
+
 # essential packages
 RUN apt-get update && apt-get install -y \
     git \
