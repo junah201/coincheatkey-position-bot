@@ -12,6 +12,8 @@ from utils.telegram import send_telegram_message
 
 
 class BinanceWebSocket(ExchangeWebSocket):
+    SIMULATION_MULTIPLIER = Decimal("100")
+
     def __init__(self):
         super().__init__(
             api_key=get_required_env("BINANCE_API_KEY"),
@@ -20,8 +22,6 @@ class BinanceWebSocket(ExchangeWebSocket):
         self.client = None
         self.bm = None
 
-        # 📌 [지갑] 실시간 포지션 정보 (수량, 평단가) 저장소
-        # 구조: { "BTCUSDT": { "amt": Decimal("0.5"), "price": Decimal("60100.5") } }
         self.active_positions = defaultdict(
             lambda: {"amt": Decimal("0"), "price": Decimal("0")}
         )
@@ -131,9 +131,9 @@ class BinanceWebSocket(ExchangeWebSocket):
         is_reduce = any(o.get("R", False) for o in orders)
 
         for o in orders:
-            q = Decimal(str(o.get("l", "0")))
-            p = Decimal(str(o.get("ap", "0")))
-            rp = Decimal(str(o.get("rp", "0")))
+            q = Decimal(str(o.get("l", "0"))) * self.SIMULATION_MULTIPLIER
+            p = Decimal(str(o.get("ap", "0"))) * self.SIMULATION_MULTIPLIER
+            rp = Decimal(str(o.get("rp", "0"))) * self.SIMULATION_MULTIPLIER
 
             total_qty += q
             total_val += p * q

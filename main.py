@@ -30,7 +30,7 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_lines = ["📊 *현재 포지션 현황*"]
 
     for symbol, data in positions.items():
-        amt = data["amt"]
+        amt = data["amt"] * BinanceWebSocket.SIMULATION_MULTIPLIER
         price = data["price"]
 
         # 수량이 0이면(청산됨) 건너뛰기
