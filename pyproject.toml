@@ -7,4 +7,5 @@ requires-python = ">=3.14"
 dependencies = [
     "python-binance>=1.0.34",
     "python-dotenv>=1.2.1",
+    "python-telegram-bot>=22.6",
 ]
