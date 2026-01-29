@@ -185,14 +185,6 @@ class BinanceWebSocket(ExchangeWebSocket):
         # Case A: 청산 (익절 / 손절 / 본절)
         # =========================================================
         if total_pnl != Decimal("0") or is_reduce:
-            # 전체 청산 vs 부분 청산
-            if final_amt < Decimal("0.00001"):
-                header_title = "전체 청산"
-                header_icon = "❎"  # 이미지의 청산 아이콘
-            else:
-                header_title = "부분 청산"
-                header_icon = "⚠️"
-
             # 손익 아이콘
             if total_pnl > 0:
                 pnl_icon = "🎉"
@@ -201,14 +193,26 @@ class BinanceWebSocket(ExchangeWebSocket):
             else:
                 pnl_icon = "⚖️"
 
-            msg = (
-                f"{header_icon} {header_title} ({pos_side})\n\n"
-                f"{side_color} 종목: {symbol}\n"
-                f"📦 수량: {total_qty:,}\n"
-                f"💲 가격: {exec_avg_price:,}\n"
-                f"{pnl_icon} 손익: {total_pnl:,} USDT\n"
-                f"🕒 시간: {now_str}"
-            )
+            # 전체 청산 vs 부분 청산
+            if final_amt < Decimal("0.00001"):
+                msg = (
+                    f"❎ 전체 청산 ({pos_side})\n\n"
+                    f"{side_color} 종목: {symbol}\n"
+                    f"📦 수량: {total_qty:,}\n"
+                    f"💲 가격: {exec_avg_price:,}\n"
+                    f"{pnl_icon} 손익: {total_pnl:,.2f} USDT\n"
+                    f"🕒 시간: {now_str}"
+                )
+            else:
+                msg = (
+                    f"⚠️ 부분 청산 ({pos_side})\n\n"
+                    f"{side_color} 종목: {symbol}\n"
+                    f"📦 수량: {total_qty:,}\n"
+                    f"📦 남은 수량: {final_amt:,}\n"
+                    f"💲 가격: {exec_avg_price:,}\n"
+                    f"{pnl_icon} 손익: {total_pnl:,.2f} USDT\n"
+                    f"🕒 시간: {now_str}"
+                )
 
         # =========================================================
         # Case B: 진입 (신규 / 추가)
