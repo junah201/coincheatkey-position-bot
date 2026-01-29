@@ -13,6 +13,6 @@ async def send_telegram_message(text: str):
     global bot
     try:
         await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
-        print(f"[전송 완료] {text}")
+        print(f"[전송 완료] {CHAT_ID} {text}")
     except Exception as e:
         print(f"[전송 실패] {e}")
