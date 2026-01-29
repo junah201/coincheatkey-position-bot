@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from collections import defaultdict
 from decimal import Decimal
@@ -32,7 +31,6 @@ class BinanceWebSocket(ExchangeWebSocket):
     async def _sync_initial_positions(self):
         """봇 시작 시 현재 포지션 상태 동기화"""
         try:
-            print("🔄 초기 포지션 정보 로딩 중...")
             account_info = await self.client.futures_account()
             for position in account_info["positions"]:
                 symbol = position["symbol"]
@@ -41,10 +39,8 @@ class BinanceWebSocket(ExchangeWebSocket):
 
                 if amt != Decimal("0"):
                     self.active_positions[symbol] = {"amt": amt, "price": ep}
-                    print(f"   ✅ 보유중: {symbol} (평단: {ep})")
-            print("🆗 동기화 완료!")
-        except Exception as e:
-            logging.error(f"동기화 실패: {e}")
+        except Exception:
+            pass
 
     async def start(self):
         self.client = await AsyncClient.create(self.api_key, self.secret_key)
@@ -52,8 +48,6 @@ class BinanceWebSocket(ExchangeWebSocket):
 
         self.bm = BinanceSocketManager(self.client)
         ts = self.bm.futures_user_socket()
-
-        print("🤖 바이낸스 봇 연결 완료. 감시 시작...")
 
         async with ts as tscm:
             while True:
@@ -66,17 +60,13 @@ class BinanceWebSocket(ExchangeWebSocket):
 
     def _handle_socket_message(self, msg):
         try:
-            # 전체 로그 저장 (디버깅용)
-            with open("b.out", "a", encoding="utf-8") as f:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n\n\n")
-
             event_type = msg.get("e")
 
-            # 📌 1. [실시간 업데이트] 계좌 변동이 오면 내 지갑(메모리)을 즉시 갱신
+            # 1. 계좌 변동이 오면 내 지갑(메모리)을 즉시 갱신
             if event_type == "ACCOUNT_UPDATE":
                 self._update_wallet(msg)
 
-            # 📌 2. [알림 대기] 주문 체결이 오면 버퍼에 넣고 타이머 시작
+            # 2. 주문 체결이 오면 버퍼에 넣고 타이머 시작
             elif event_type == "ORDER_TRADE_UPDATE":
                 self._buffer_order(msg)
 
@@ -88,9 +78,8 @@ class BinanceWebSocket(ExchangeWebSocket):
         data = msg.get("a", {})
         for p in data.get("P", []):
             symbol = p["s"]
-            # 📌 바이낸스가 계산해준 '최신 평단가'와 '수량'을 저장
-            amt = Decimal(str(p["pa"]))
-            ep = Decimal(str(p["ep"]))
+            amt = Decimal(str(p["pa"]))  # 포지션 수량
+            ep = Decimal(str(p["ep"]))  # 최신 평단가
 
             self.active_positions[symbol] = {"amt": amt, "price": ep}
 
@@ -111,6 +100,41 @@ class BinanceWebSocket(ExchangeWebSocket):
         if symbol not in self.flush_tasks:
             self.flush_tasks[symbol] = asyncio.create_task(self._flush_buffer(symbol))
 
+    def aggregate_order_buffer(
+        self, orders: list[dict[str, any]], multiplier: Decimal
+    ) -> dict[str, any]:
+        """
+        주문 목록을 받아 집계된 데이터를 반환하는 순수 함수
+        """
+        total_qty = Decimal("0")
+        total_val = Decimal("0")
+        total_pnl = Decimal("0")
+
+        # 첫 주문의 Side를 기준 (보통 버퍼 내 주문은 같은 방향이라고 가정)
+        side = orders[0]["S"]
+        # 하나라도 Reduce(R) 속성이 있으면 청산으로 간주
+        is_reduce = any(o.get("R", False) for o in orders)
+
+        for o in orders:
+            q = Decimal(str(o.get("l", "0"))) * multiplier
+            p = Decimal(str(o.get("ap", "0"))) * multiplier
+            rp = Decimal(str(o.get("rp", "0"))) * multiplier
+
+            total_qty += q
+            total_val += p * q
+            total_pnl += rp
+
+        # 실행 평단가 계산 (0으로 나누기 방지)
+        exec_avg_price = total_val / total_qty if total_qty > 0 else Decimal("0")
+
+        return {
+            "total_qty": total_qty,
+            "total_pnl": total_pnl,
+            "exec_avg_price": exec_avg_price,
+            "side": side,
+            "is_reduce": is_reduce,
+        }
+
     async def _flush_buffer(self, symbol):
         """0.5초 대기 후 데이터를 취합해서 알림 전송"""
 
@@ -119,34 +143,26 @@ class BinanceWebSocket(ExchangeWebSocket):
         orders = self.msg_buffer.pop(symbol, [])
         if symbol in self.flush_tasks:
             del self.flush_tasks[symbol]
+
         if not orders:
             return
 
-        # --- 데이터 계산 ---
-        total_qty = Decimal("0")
-        total_val = Decimal("0")
-        total_pnl = Decimal("0")
+        agg_data = self.aggregate_order_buffer(orders, self.SIMULATION_MULTIPLIER)
 
-        side = orders[0]["S"]
-        is_reduce = any(o.get("R", False) for o in orders)
+        total_qty = agg_data["total_qty"]
+        total_pnl = agg_data["total_pnl"]
+        exec_avg_price = agg_data["exec_avg_price"]
+        side = agg_data["side"]
+        is_reduce = agg_data["is_reduce"]
 
-        for o in orders:
-            q = Decimal(str(o.get("l", "0"))) * self.SIMULATION_MULTIPLIER
-            p = Decimal(str(o.get("ap", "0"))) * self.SIMULATION_MULTIPLIER
-            rp = Decimal(str(o.get("rp", "0"))) * self.SIMULATION_MULTIPLIER
-
-            total_qty += q
-            total_val += p * q
-            total_pnl += rp
-
-        exec_avg_price = total_val / total_qty if total_qty > 0 else Decimal("0")
-
+        # 지갑 상태 조회
         wallet = self.active_positions.get(
             symbol, {"amt": Decimal("0"), "price": Decimal("0")}
         )
         final_ep = wallet["price"]
         final_amt = abs(wallet["amt"])
 
+        # 포지션 방향 및 색상 결정
         if total_pnl == 0:
             pos_type = "롱" if side == "BUY" else "숏"
             color = "🟢" if side == "BUY" else "🔴"
@@ -170,17 +186,15 @@ class BinanceWebSocket(ExchangeWebSocket):
                 icon = "⚖️"
                 pnl_type = "청산"
 
-            # 📌 [수정됨] 수량 표시 로직 변경
             if final_amt < Decimal("0.00001"):
                 # 전량 청산일 때
                 trade_type = f"{pnl_type}"
                 detail_txt = f"/ 수량: {total_qty:,.4f} (전량 청산)"
             else:
-                # 부분 청산일 때 (요청하신 부분!)
+                # 부분 청산일 때
                 trade_type = f"부분 {pnl_type}"
                 detail_txt = f"/ 수량: {total_qty:,.4f} / 남은수량: {final_amt:,.4f}"
 
-            # 예: 💰 [부분 익절] RIVERUSDT 롱 / 평단: xxx / 수량: 1.5 / 남은수량: 2.7
             msg = f"{icon} [{trade_type}] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} {detail_txt}\n"
             msg += f"확정손익: ${total_pnl:,.2f}"
 
@@ -194,7 +208,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 # 신규 진입
                 msg = f"{color}[진입] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} / 수량: {total_qty:,.4f}"
             else:
-                # 추가 매수
+                # 추가 매수 (물타기)
                 msg = f"{color}[추가매수] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} / 수량: {total_qty:,.4f}\n"
                 msg += f"➡️ 최종평단: {final_ep:,.4f} / 누적수량: {final_amt:,.4f}"
 

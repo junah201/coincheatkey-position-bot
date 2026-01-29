@@ -13,7 +13,7 @@ binance_ws = BinanceWebSocket()
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 봇이 실행 중입니다! /pos 을 입력해보세요.")
+    await update.message.reply_text("봇이 실행 중입니다! /pos 을 입력해보세요.")
 
 
 async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -42,7 +42,6 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg_lines.append(f"• 수량: `{amt}`")
         msg_lines.append(f"• 평단: `{price:,.4f}`")
 
-    # 메시지가 비어있다면 (모두 0인 경우)
     if len(msg_lines) == 1:
         await update.message.reply_text("🤷‍♂️ 현재 보유 중인 포지션이 없습니다.")
         return
@@ -57,21 +56,16 @@ async def post_init(application):
     """
     print("🚀 텔레그램 봇 시작됨 & 바이낸스 소켓 연결 시도...")
 
-    # 📌 핵심: 바이낸스 소켓을 Non-blocking Task로 실행
     asyncio.create_task(binance_ws.start())
 
 
 def main():
-    # 1. 텔레그램 애플리케이션 빌드
     application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # 2. 핸들러 등록
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("pos", position_command))
 
-    # 3. 봇 실행 (Polling 방식)
-    # run_polling()이 내부적으로 asyncio 루프를 돌리며 계속 실행됩니다.
-    print("🤖 봇 폴링 시작...")
+    print("봇 폴링 시작...")
     application.run_polling()
 
 
