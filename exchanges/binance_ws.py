@@ -8,6 +8,7 @@ from binance import AsyncClient, BinanceSocketManager
 
 from exchanges.base import ExchangeWebSocket
 from utils import get_required_env
+from utils.string import f
 from utils.telegram import send_telegram_message
 
 
@@ -199,7 +200,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                     f"❎ 전체 청산 ({pos_side})\n\n"
                     f"{side_color} 종목: {symbol}\n"
                     f"📦 수량: {total_qty:,}\n"
-                    f"💲 가격: {exec_avg_price:,.8f}\n"
+                    f"💲 가격: {f(exec_avg_price)}\n"
                     f"{pnl_icon} 손익: {total_pnl:,.2f} USDT\n"
                     f"🕒 시간: {now_str}"
                 )
@@ -209,7 +210,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                     f"{side_color} 종목: {symbol}\n"
                     f"📦 수량: {total_qty:,}\n"
                     f"📦 남은 수량: {final_amt:,}\n"
-                    f"💲 가격: {exec_avg_price:,.8f}\n"
+                    f"💲 가격: {f(exec_avg_price)}\n"
                     f"{pnl_icon} 손익: {total_pnl:,.2f} USDT\n"
                     f"🕒 시간: {now_str}"
                 )
@@ -226,7 +227,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                     f"💥 {header_title} ({pos_side})\n\n"
                     f"{side_color} 종목: {symbol}\n"
                     f"📦 수량: {total_qty:,}\n"
-                    f"💲 가격: {exec_avg_price:,}\n"
+                    f"💲 평단: {f(exec_avg_price)}\n"
                     f"🕒 시간: {now_str}"
                 )
             else:
@@ -235,8 +236,8 @@ class BinanceWebSocket(ExchangeWebSocket):
                     f"💥 {header_title} ({pos_side})\n\n"
                     f"{side_color} 종목: {symbol}\n"
                     f"📦 수량: {total_qty:,}\n"
-                    f"💲 가격: {exec_avg_price:,}\n"
-                    f"💲 최종 평단가: {final_ep:,} USDT\n"
+                    f"💲 평단: {f(exec_avg_price)}\n"
+                    f"💲 최종 평단가: {f(final_ep)} USDT\n"
                     f"📦 최종 수량: {final_amt:,}\n"
                     f"🕒 시간: {now_str}"
                 )

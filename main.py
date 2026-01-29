@@ -6,6 +6,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 from exchanges.binance_ws import BinanceWebSocket
 from utils import get_required_env
+from utils.string import f
 
 TOKEN = get_required_env("TELEGRAM_TOKEN")
 
@@ -40,7 +41,7 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         side = "🟢 롱" if amt > 0 else "🔴 숏"
         msg_lines.append(f"\n*{symbol}* {side}")
         msg_lines.append(f"• 수량: `{amt}`")
-        msg_lines.append(f"• 평단: `{price:,.4f}`")
+        msg_lines.append(f"• 평단: `{f(price)}`")
 
     if len(msg_lines) == 1:
         await update.message.reply_text("🤷‍♂️ 현재 보유 중인 포지션이 없습니다.")
