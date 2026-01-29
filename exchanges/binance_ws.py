@@ -166,7 +166,7 @@ class BinanceWebSocket(ExchangeWebSocket):
             symbol, {"amt": Decimal("0"), "price": Decimal("0")}
         )
         final_ep = wallet["price"]
-        final_amt = abs(wallet["amt"])
+        final_amt = abs(wallet["amt"]) * self.SIMULATION_MULTIPLIER
 
         # 포지션 방향 및 색상 결정
         if is_reduce or total_pnl != 0:
@@ -219,7 +219,7 @@ class BinanceWebSocket(ExchangeWebSocket):
         # Case B: 진입 (신규 / 추가)
         # =========================================================
         else:
-            prev_amt = (final_amt * self.SIMULATION_MULTIPLIER) - total_qty
+            prev_amt = final_amt - total_qty
 
             if prev_amt < Decimal("0.00001"):
                 header_title = "신규 진입"
