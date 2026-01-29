@@ -204,9 +204,9 @@ class BinanceWebSocket(ExchangeWebSocket):
             msg = (
                 f"{header_icon} {header_title} ({pos_side})\n\n"
                 f"{side_color} 종목: {symbol}\n"
-                f"📦 수량: {total_qty:,.4f}\n"
-                f"💲 가격: {exec_avg_price:,.4f}\n"
-                f"{pnl_icon} 손익: {total_pnl:,.4f} USDT\n"
+                f"📦 수량: {total_qty:,}\n"
+                f"💲 가격: {exec_avg_price:,}\n"
+                f"{pnl_icon} 손익: {total_pnl:,} USDT\n"
                 f"🕒 시간: {now_str}"
             )
 
@@ -221,8 +221,8 @@ class BinanceWebSocket(ExchangeWebSocket):
                 msg = (
                     f"💥 {header_title} ({pos_side})\n\n"
                     f"{side_color} 종목: {symbol}\n"
-                    f"📦 수량: {total_qty:,.4f}\n"
-                    f"💲 가격: {exec_avg_price:,.4f}\n"
+                    f"📦 수량: {total_qty:,}\n"
+                    f"💲 가격: {exec_avg_price:,}\n"
                     f"🕒 시간: {now_str}"
                 )
             else:
@@ -230,10 +230,10 @@ class BinanceWebSocket(ExchangeWebSocket):
                 msg = (
                     f"💥 {header_title} ({pos_side})\n\n"
                     f"{side_color} 종목: {symbol}\n"
-                    f"📦 수량: {total_qty:,.4f}\n"
-                    f"💲 가격: {exec_avg_price:,.4f}\n"
-                    f"💲 최종 평단가: {final_ep:,.4f} USDT\n"
-                    f"📦 최종 수량: {final_amt:,.4f}\n"
+                    f"📦 수량: {total_qty:,}\n"
+                    f"💲 가격: {exec_avg_price:,}\n"
+                    f"💲 최종 평단가: {final_ep:,} USDT\n"
+                    f"📦 최종 수량: {final_amt:,}\n"
                     f"🕒 시간: {now_str}"
                 )
 
