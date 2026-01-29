@@ -156,7 +156,6 @@ class BinanceWebSocket(ExchangeWebSocket):
 
         total_qty = agg_data["total_qty"]
         total_pnl = agg_data["total_pnl"]
-        total_fee = agg_data["total_fee"]
         exec_avg_price = agg_data["exec_avg_price"]
         side = agg_data["side"]
         is_reduce = agg_data["is_reduce"]
@@ -206,7 +205,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 f"{header_icon} {header_title} ({pos_side})\n\n"
                 f"{side_color} 종목: {symbol}\n"
                 f"📦 수량: {total_qty:,.4f}\n"
-                f"💲 가격: {exec_avg_price:,.2f}\n"
+                f"💲 가격: {exec_avg_price:,.4f}\n"
                 f"{pnl_icon} 손익: {total_pnl:,.4f} USDT\n"
                 f"🕒 시간: {now_str}"
             )
@@ -223,7 +222,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                     f"💥 {header_title} ({pos_side})\n\n"
                     f"{side_color} 종목: {symbol}\n"
                     f"📦 수량: {total_qty:,.4f}\n"
-                    f"💲 가격: {exec_avg_price:,.2f}\n"
+                    f"💲 가격: {exec_avg_price:,.4f}\n"
                     f"🕒 시간: {now_str}"
                 )
             else:
@@ -232,7 +231,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                     f"💥 {header_title} ({pos_side})\n\n"
                     f"{side_color} 종목: {symbol}\n"
                     f"📦 수량: {total_qty:,.4f}\n"
-                    f"💲 가격: {exec_avg_price:,.2f}\n"
+                    f"💲 가격: {exec_avg_price:,.4f}\n"
                     f"💲 최종 평단가: {final_ep:,.4f} USDT\n"
                     f"📦 최종 수량: {final_amt:,.4f}\n"
                     f"🕒 시간: {now_str}"
