@@ -23,8 +23,13 @@ class BinanceWebSocket(ExchangeWebSocket):
         self.client = None
         self.bm = None
 
+        # [변경 1] 누적 손익(cum_pnl) 필드 추가
         self.active_positions = defaultdict(
-            lambda: {"amt": Decimal("0"), "price": Decimal("0")}
+            lambda: {
+                "amt": Decimal("0"),
+                "price": Decimal("0"),
+                "cum_pnl": Decimal("0"),
+            }
         )
 
         self.msg_buffer = defaultdict(list)
@@ -40,7 +45,8 @@ class BinanceWebSocket(ExchangeWebSocket):
                 ep = Decimal(str(position["entryPrice"]))
 
                 if amt != Decimal("0"):
-                    self.active_positions[symbol] = {"amt": amt, "price": ep}
+                    # 초기화 시에는 과거 내역을 모르니 cum_pnl은 0으로 시작
+                    self.active_positions[symbol].update({"amt": amt, "price": ep})
         except Exception:
             pass
 
@@ -83,7 +89,10 @@ class BinanceWebSocket(ExchangeWebSocket):
             amt = Decimal(str(p["pa"]))  # 포지션 수량
             ep = Decimal(str(p["ep"]))  # 최신 평단가
 
-            self.active_positions[symbol] = {"amt": amt, "price": ep}
+            # [변경 2] 딕셔너리를 통째로 덮어쓰지 않고, 수량과 평단만 업데이트
+            # (이유: cum_pnl 기록을 유지하기 위함)
+            self.active_positions[symbol]["amt"] = amt
+            self.active_positions[symbol]["price"] = ep
 
     def _buffer_order(self, msg):
         """ORDER_TRADE_UPDATE 이벤트 처리"""
@@ -113,14 +122,13 @@ class BinanceWebSocket(ExchangeWebSocket):
         total_pnl = Decimal("0")  # 총 실현 손익
         total_fee = Decimal("0")  # 총 수수료
 
-        # 첫 주문의 Side를 기준 (보통 버퍼 내 주문은 같은 방향이라고 가정)
         side = orders[0]["S"]
-        # 하나라도 Reduce(R) 속성이 있으면 청산으로 간주
         is_reduce = any(o.get("R", False) for o in orders)
 
         for o in orders:
             q = Decimal(str(o.get("l", "0"))) * multiplier
             p = Decimal(str(o.get("ap", "0")))  # 체결 가격
+            # Binance는 'rp' 키에 실현 손익을 줌
             rp = Decimal(str(o.get("rp", "0"))) * multiplier
             fee = Decimal(str(o.get("n", "0"))) * multiplier
 
@@ -142,52 +150,37 @@ class BinanceWebSocket(ExchangeWebSocket):
         }
 
     async def get_positions_with_pnl(self):
-        """
-        현재 활성화된 포지션에 대해 현재가를 조회하여 PnL을 계산해 반환
-        """
+        """현재 포지션 + 실현손익 조회"""
         if not self.active_positions or not self.client:
             return []
 
-        # 1. 활성화된 포지션 심볼 목록 추출
         active_symbols = [
             s
             for s, data in self.active_positions.items()
             if data["amt"] != Decimal("0")
         ]
-
         if not active_symbols:
             return []
 
-        # 2. 바이낸스 API로 현재가 조회 (한 번에 모든 티커 조회 후 필터링이 효율적)
-        # futures_symbol_ticker()는 인자 없이 호출하면 모든 심볼의 가격을 가져옵니다.
         try:
             all_tickers = await self.client.futures_symbol_ticker()
-            # 검색 속도를 위해 {symbol: price} 딕셔너리로 변환
             price_map = {t["symbol"]: Decimal(str(t["price"])) for t in all_tickers}
-        except Exception as e:
-            logging.error(f"가격 조회 실패: {e}")
+        except Exception:
             return []
 
         results = []
-
-        # 3. 각 포지션별 PnL 계산
         for symbol in active_symbols:
             data = self.active_positions[symbol]
             entry_price = data["price"]
-            raw_amt = data["amt"]  # 거래소 기준 원본 수량
+            raw_amt = data["amt"]
 
-            # 시뮬레이션 배율 적용된 수량
             sim_amt = raw_amt * self.SIMULATION_MULTIPLIER
 
-            # 현재가 가져오기 (없으면 진입가로 대체하여 PnL 0으로 처리)
+            # [추가] 메모리에 누적된 실현 손익 가져오기
+            realized_pnl = data.get("cum_pnl", Decimal("0"))
+
             current_price = price_map.get(symbol, entry_price)
-
-            # 미실현 손익 계산 공식: (현재가 - 평단가) * 수량
-            # 롱(양수): 가격 오르면 이득, 숏(음수): 가격 내리면 이득 (수량 부호 덕분에 공식 하나로 통일됨)
             pnl = (current_price - entry_price) * sim_amt
-
-            # 수익률(ROE) 계산: (손익 / (평단 * 절대값수량)) * 100
-            # 레버리지 미반영된 순수 등락률입니다.
             entry_value = entry_price * abs(sim_amt)
             roe = (pnl / entry_value) * 100 if entry_value > 0 else Decimal("0")
 
@@ -198,15 +191,15 @@ class BinanceWebSocket(ExchangeWebSocket):
                     "amount": sim_amt,
                     "entry_price": entry_price,
                     "current_price": current_price,
-                    "pnl": pnl,
+                    "pnl": pnl,  # 미실현
+                    "realized_pnl": realized_pnl,  # 실현
                     "roe": roe,
                 }
             )
-
         return results
 
     async def _flush_buffer(self, symbol):
-        """0.5초 대기 후 데이터를 취합해서 알림 전송"""
+        """0.5초 대기 후 데이터를 취합해서 알림 전송 (디자인 업그레이드 버전)"""
 
         await asyncio.sleep(0.5)
 
@@ -227,57 +220,69 @@ class BinanceWebSocket(ExchangeWebSocket):
 
         # 지갑 상태 조회
         wallet = self.active_positions.get(
-            symbol, {"amt": Decimal("0"), "price": Decimal("0")}
+            symbol,
+            {"amt": Decimal("0"), "price": Decimal("0"), "cum_pnl": Decimal("0")},
         )
         final_ep = wallet["price"]
         final_amt = abs(wallet["amt"]) * self.SIMULATION_MULTIPLIER
 
-        # 포지션 방향 및 색상 결정
+        # 손익 누적 (메모리 업데이트)
+        if total_pnl != 0:
+            self.active_positions[symbol]["cum_pnl"] += total_pnl
+
+        cumulative_pnl = self.active_positions[symbol]["cum_pnl"]
+
+        # 포지션 방향 및 색상
         if is_reduce or total_pnl != 0:
-            # 청산 주문의 경우: BUY면 숏을 청산한 것, SELL이면 롱을 청산한 것
             pos_side = "SHORT" if side == "BUY" else "LONG"
-            side_color = "🔴" if pos_side == "SHORT" else "🟢"  # 숏은 빨강, 롱은 초록
+            side_color = "🔴" if pos_side == "SHORT" else "🟢"
         else:
-            # 진입 주문의 경우: BUY면 롱 진입, SELL이면 숏 진입
             pos_side = "LONG" if side == "BUY" else "SHORT"
             side_color = "🟢" if pos_side == "LONG" else "🔴"
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S KST")
 
-        msg = ""
+        # 메시지 작성을 위한 리스트 (나중에 join으로 합침)
+        lines = []
 
         # =========================================================
-        # Case A: 청산 (익절 / 손절 / 본절)
+        # Case A: 청산 (익절 / 손절)
         # =========================================================
         if total_pnl != Decimal("0") or is_reduce:
-            # 손익 아이콘
-            if total_pnl > 0:
-                pnl_icon = "🎉"
-            elif total_pnl < 0:
-                pnl_icon = "💧"
-            else:
-                pnl_icon = "⚖️"
-
-            # 전체 청산 vs 부분 청산
+            # 1. 전체 청산
             if final_amt < Decimal("0.00001"):
-                msg = (
-                    f"❎ 전체 청산 ({pos_side})\n\n"
-                    f"{side_color} 종목: {symbol}\n"
-                    f"📦 수량: {total_qty:,}\n"
-                    f"💲 가격: {f(exec_avg_price)}\n"
-                    f"{pnl_icon} 손익: {total_pnl:,.2f} USDT\n"
-                    f"🕒 시간: {now_str}"
+                cycle_icon = "💰" if cumulative_pnl > 0 else "💸"
+
+                lines.append(f"❎ *전체 청산 ({pos_side})*")
+                lines.append("")
+                lines.append(f"• *종목*: {side_color} `{symbol}`")
+                lines.append("──────────────")
+                lines.append(f"• *정리수량*: `{total_qty:,}`")
+                lines.append(f"• *종료가격*: `{f(exec_avg_price)}`")
+                lines.append(f"• *마지막 손익*: `{total_pnl:,.2f}` USDT")
+                lines.append("──────────────")
+                lines.append(
+                    f"{cycle_icon} *최종 확정 이익*: `{cumulative_pnl:,.2f}` USDT"
                 )
+
+                # 리셋
+                self.active_positions[symbol]["cum_pnl"] = Decimal("0")
+
+            # 2. 부분 청산
             else:
-                msg = (
-                    f"⚠️ 부분 청산 ({pos_side})\n\n"
-                    f"{side_color} 종목: {symbol}\n"
-                    f"📦 수량: {total_qty:,}\n"
-                    f"📦 남은 수량: {final_amt:,}\n"
-                    f"💲 가격: {f(exec_avg_price)}\n"
-                    f"{pnl_icon} 손익: {total_pnl:,.2f} USDT\n"
-                    f"🕒 시간: {now_str}"
-                )
+                pnl_icon = "🎉" if total_pnl > 0 else "💧"
+                cum_icon = "💰" if cumulative_pnl > 0 else "💸"
+
+                lines.append(f"⚠️ *부분 청산 ({pos_side})*")
+                lines.append("")
+                lines.append(f"• *종목*: {side_color} `{symbol}`")
+                lines.append("──────────────")
+                lines.append(f"• *정리수량*: `{total_qty:,}`")
+                lines.append(f"• *남은수량*: `{final_amt:,}`")
+                lines.append(f"• *체결가격*: `{f(exec_avg_price)}`")
+                lines.append("──────────────")
+                lines.append(f"• *이번손익*: {pnl_icon} `{total_pnl:,.2f}` USDT")
+                lines.append(f"• *누적실현*: {cum_icon} `{cumulative_pnl:,.2f}` USDT")
 
         # =========================================================
         # Case B: 진입 (신규 / 추가)
@@ -286,25 +291,31 @@ class BinanceWebSocket(ExchangeWebSocket):
             prev_amt = final_amt - total_qty
 
             if prev_amt < Decimal("0.00001"):
-                header_title = "신규 진입"
-                msg = (
-                    f"💥 {header_title} ({pos_side})\n\n"
-                    f"{side_color} 종목: {symbol}\n"
-                    f"📦 수량: {total_qty:,}\n"
-                    f"💲 평단: {f(exec_avg_price)}\n"
-                    f"🕒 시간: {now_str}"
-                )
+                # 신규 진입
+                self.active_positions[symbol]["cum_pnl"] = Decimal("0")
+
+                lines.append(f"⚡ *신규 진입 ({pos_side})*")
+                lines.append("")
+                lines.append(f"• *종목*: {side_color} `{symbol}`")
+                lines.append("──────────────")
+                lines.append(f"• *진입수량*: `{total_qty:,}`")
+                lines.append(f"• *진입가격*: `{f(exec_avg_price)}`")
             else:
-                header_title = "추가 진입"
-                msg = (
-                    f"💥 {header_title} ({pos_side})\n\n"
-                    f"{side_color} 종목: {symbol}\n"
-                    f"📦 수량: {total_qty:,}\n"
-                    f"💲 평단: {f(exec_avg_price)}\n"
-                    f"💲 최종 평단가: {f(final_ep)} USDT\n"
-                    f"📦 최종 수량: {final_amt:,}\n"
-                    f"🕒 시간: {now_str}"
-                )
+                # 추가 진입 (물타기/불타기)
+                lines.append(f"🌊 *추가 진입 ({pos_side})*")
+                lines.append("")
+                lines.append(f"• *종목*: {side_color} `{symbol}`")
+                lines.append("──────────────")
+                lines.append(f"• *추가수량*: `{total_qty:,}`")
+                lines.append(f"• *추가단가*: `{f(exec_avg_price)}`")
+                lines.append(f"• *최종평단*: `{f(final_ep)}`")
+                lines.append(f"• *보유수량*: `{final_amt:,}`")
+
+        # 공통 하단 (시간)
+        lines.append(f"• *시간*: `{now_str}`")
+
+        # 최종 메시지 조립
+        msg = "\n".join(lines)
 
         print(msg)
         print("-" * 30)

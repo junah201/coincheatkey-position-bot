@@ -12,7 +12,7 @@ async def send_telegram_message(text: str):
     """실제 텔레그램 전송 함수"""
     global bot
     try:
-        await bot.send_message(chat_id=CHAT_ID, text=text)
+        await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
         print(f"[전송 완료] {text}")
     except Exception as e:
         print(f"[전송 실패] {e}")

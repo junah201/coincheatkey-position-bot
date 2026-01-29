@@ -20,9 +20,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /pos 명령어 처리
-    현재가 조회 및 PnL 계산 포함
+    [실현 손익]과 [평가 손익]을 동시에 표시
     """
-    # 웹소켓 클래스에 새로 만든 메서드 호출
+    # 1. 포지션 정보 가져오기 (여기서 realized_pnl도 같이 옴)
     positions_info = await binance_ws.get_positions_with_pnl()
 
     if not positions_info:
@@ -31,7 +31,9 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg_lines = ["📊 *현재 포지션 현황*"]
 
-    total_pnl = Decimal("0")
+    # 합계 변수 분리
+    total_unrealized_pnl = Decimal("0")
+    total_realized_pnl = Decimal("0")
 
     for p in positions_info:
         symbol = p["symbol"]
@@ -39,23 +41,48 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amt = p["amount"]
         entry_price = p["entry_price"]
         current_price = p["current_price"]
-        pnl = p["pnl"]
+
+        # 데이터 추출
+        pnl = p["pnl"]  # 평가 손익 (Unrealized)
+        realized_pnl = p.get(
+            "realized_pnl", Decimal("0")
+        )  # 실현 손익 (Realized) - 새로 추가된 부분
         roe = p["roe"]
 
-        total_pnl += pnl
+        # 합계 누적
+        total_unrealized_pnl += pnl
+        total_realized_pnl += realized_pnl
 
-        # 이모지 결정 (수익이면 축하, 손실이면 눈물)
-        pnl_icon = "🔥" if pnl > 0 else "💧"
+        # 이모지 결정
+        u_icon = "🔥" if pnl > 0 else "💧"
+        r_icon = "💰" if realized_pnl > 0 else "💸"
 
         msg_lines.append(f"\n*{symbol}* {side}")
-        msg_lines.append(f"• 수량: `{amt:,}`")  # 천단위 콤마
+        msg_lines.append(f"• 수량: `{amt:,}`")
         msg_lines.append(f"• 평단: `{f(entry_price)}`")
         msg_lines.append(f"• 현재: `{f(current_price)}`")
-        msg_lines.append(f"• 손익: {pnl_icon} `{pnl:,.2f}` USDT ({roe:+.2f}%)")
 
-    # 총 손익 표시
-    total_icon = "💰" if total_pnl >= 0 else "💸"
-    msg_lines.append(f"\n{total_icon} *총 미실현 손익:* `{total_pnl:,.2f}` USDT")
+        # 🔥 [핵심] 실현 손익이 있을 때만 한 줄 더 보여줌
+        if realized_pnl != Decimal("0"):
+            msg_lines.append(f"• 실현손익: {r_icon} `{realized_pnl:,.2f}` USDT (확정)")
+
+        msg_lines.append(f"• 평가손익: {u_icon} `{pnl:,.2f}` USDT ({roe:+.2f}%)")
+
+    # 하단 요약 (구분선 추가)
+    msg_lines.append("\n──────────────")
+
+    # 총 실현 손익이 있으면 표시
+    if total_realized_pnl != Decimal("0"):
+        total_r_icon = "💰" if total_realized_pnl > 0 else "💸"
+        msg_lines.append(
+            f"{total_r_icon} *총 실현 손익:* `{total_realized_pnl:,.2f}` USDT"
+        )
+
+    # 총 평가 손익 표시
+    total_u_icon = "🔥" if total_unrealized_pnl >= 0 else "💧"
+    msg_lines.append(
+        f"{total_u_icon} *총 평가 손익:* `{total_unrealized_pnl:,.2f}` USDT"
+    )
 
     await update.message.reply_text("\n".join(msg_lines), parse_mode="Markdown")
 
