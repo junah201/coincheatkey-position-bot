@@ -307,7 +307,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append(f"• *종목*: {side_color} `{symbol}`")
                 lines.append("──────────────")
                 lines.append(f"• *추가수량*: `{total_qty:,}`")
-                lines.append(f"• *추가단가*: `{f(exec_avg_price)}`")
+                lines.append(f"• *추매가격*: `{f(exec_avg_price)}`")
                 lines.append(f"• *최종평단*: `{f(final_ep)}`")
                 lines.append(f"• *보유수량*: `{final_amt:,}`")
 
