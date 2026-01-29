@@ -194,13 +194,10 @@ class BinanceWebSocket(ExchangeWebSocket):
                 header_title = "부분 청산"
                 header_icon = "⚠️"
 
-            # 실현손익 계산 (순수익 = PnL + Fee) *Fee가 음수라고 가정
-            net_pnl = total_pnl + total_fee
-
             # 손익 아이콘
-            if net_pnl > 0:
+            if total_pnl > 0:
                 pnl_icon = "🎉"
-            elif net_pnl < 0:
+            elif total_pnl < 0:
                 pnl_icon = "💧"
             else:
                 pnl_icon = "⚖️"
@@ -210,8 +207,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 f"{side_color} 종목: {symbol}\n"
                 f"📦 수량: {total_qty:,.4f}\n"
                 f"💲 가격: {exec_avg_price:,.2f}\n"
-                f"{pnl_icon} 실현손익(해당 체결): {net_pnl:,.4f} USDT\n"
-                f"- PnL: {total_pnl:,.4f}"
+                f"{pnl_icon} 손익: {total_pnl:,.4f} USDT\n"
                 f"🕒 시간: {now_str}"
             )
 
