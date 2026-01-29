@@ -119,7 +119,7 @@ class BinanceWebSocket(ExchangeWebSocket):
 
         for o in orders:
             q = Decimal(str(o.get("l", "0"))) * multiplier
-            p = Decimal(str(o.get("ap", "0"))) * multiplier
+            p = Decimal(str(o.get("ap", "0")))  # 체결 가격
             rp = Decimal(str(o.get("rp", "0"))) * multiplier
             fee = Decimal(str(o.get("n", "0"))) * multiplier
 
@@ -205,15 +205,15 @@ class BinanceWebSocket(ExchangeWebSocket):
             else:
                 pnl_icon = "⚖️"
 
-            msg = f"""
-                {header_icon} {header_title} ({pos_side})\n\n
-                {side_color} 종목: {symbol}\n
-                📦 수량: {total_qty:,.4f}\n
-                💲 가격: {exec_avg_price:,.2f}\n
-                {pnl_icon} 실현손익(해당 체결): {net_pnl:,.4f} USDT\n
-                - PnL: {total_pnl:,.4f} / Fee: {total_fee:,.4f}\n
-                🕒 시간: {now_str}
-                """
+            msg = (
+                f"{header_icon} {header_title} ({pos_side})\n\n"
+                f"{side_color} 종목: {symbol}\n"
+                f"📦 수량: {total_qty:,.4f}\n"
+                f"💲 가격: {exec_avg_price:,.2f}\n"
+                f"{pnl_icon} 실현손익(해당 체결): {net_pnl:,.4f} USDT\n"
+                f"- PnL: {total_pnl:,.4f}"
+                f"🕒 시간: {now_str}"
+            )
 
         # =========================================================
         # Case B: 진입 (신규 / 추가)
@@ -222,27 +222,25 @@ class BinanceWebSocket(ExchangeWebSocket):
             prev_amt = final_amt - total_qty
 
             if prev_amt < Decimal("0.00001"):
-                header_title = "신규 진입"  # 혹은 이미지처럼 "신규/추가 진입" 통일
-                msg = f"""
-                    💥 {header_title} ({pos_side})\n\n
-                    {side_color} 종목: {symbol}\n
-                    📦 수량: {total_qty:,.4f}\n
-                    💲 가격: {exec_avg_price:,.2f}\n
-                    💸 수수료: {total_fee:,.4f} USDT\n
-                    🕒 시간: {now_str}
-                    """
+                header_title = "신규 진입"
+                msg = (
+                    f"💥 {header_title} ({pos_side})\n\n"
+                    f"{side_color} 종목: {symbol}\n"
+                    f"📦 수량: {total_qty:,.4f}\n"
+                    f"💲 가격: {exec_avg_price:,.2f}\n"
+                    f"🕒 시간: {now_str}"
+                )
             else:
-                header_title = "추가 진입"  # 물타기/불타기
-                msg = f"""
-                    💥 {header_title} ({pos_side})\n\n
-                    {side_color} 종목: {symbol}\n
-                    📦 수량: {total_qty:,.4f}\n
-                    💲 가격: {exec_avg_price:,.2f}\n
-                    💸 수수료: {total_fee:,.4f} USDT\n
-                    💲 최종 평단가: {final_ep:,.4f} USDT\n
-                    📦 최종 수량: {final_amt:,.4f}\n
-                    🕒 시간: {now_str}
-                    """
+                header_title = "추가 진입"
+                msg = (
+                    f"💥 {header_title} ({pos_side})\n\n"
+                    f"{side_color} 종목: {symbol}\n"
+                    f"📦 수량: {total_qty:,.4f}\n"
+                    f"💲 가격: {exec_avg_price:,.2f}\n"
+                    f"💲 최종 평단가: {final_ep:,.4f} USDT\n"
+                    f"📦 최종 수량: {final_amt:,.4f}\n"
+                    f"🕒 시간: {now_str}"
+                )
 
         print(msg)
         print("-" * 30)
