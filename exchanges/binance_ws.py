@@ -219,7 +219,7 @@ class BinanceWebSocket(ExchangeWebSocket):
         # Case B: 진입 (신규 / 추가)
         # =========================================================
         else:
-            prev_amt = final_amt - total_qty
+            prev_amt = (final_amt * self.SIMULATION_MULTIPLIER) - total_qty
 
             if prev_amt < Decimal("0.00001"):
                 header_title = "신규 진입"
