@@ -298,7 +298,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append("")
                 lines.append(f"• *종목*: {side_color} `{symbol}`")
                 lines.append("──────────────")
-                lines.append(f"• *진입수량*: `{total_qty:,}`")
+                lines.append(f"• *진입수량*: `{f(total_qty)}`")
                 lines.append(f"• *진입가격*: `{f(exec_avg_price)}`")
             else:
                 # 추가 진입 (물타기/불타기)
@@ -306,10 +306,10 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append("")
                 lines.append(f"• *종목*: {side_color} `{symbol}`")
                 lines.append("──────────────")
-                lines.append(f"• *추가수량*: `{total_qty:,}`")
+                lines.append(f"• *추가수량*: `{f(total_qty)}`")
                 lines.append(f"• *추매가격*: `{f(exec_avg_price)}`")
                 lines.append(f"• *최종평단*: `{f(final_ep)}`")
-                lines.append(f"• *보유수량*: `{final_amt:,}`")
+                lines.append(f"• *보유수량*: `{f(final_amt)}`")
 
         # 공통 하단 (시간)
         lines.append(f"• *시간*: `{now_str}`")

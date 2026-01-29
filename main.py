@@ -58,7 +58,7 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r_icon = "💰" if realized_pnl > 0 else "💸"
 
         msg_lines.append(f"\n*{symbol}* {side}")
-        msg_lines.append(f"• 수량: `{amt:,}`")
+        msg_lines.append(f"• 수량: `{f(amt)}`")
         msg_lines.append(f"• 평단: `{f(entry_price)}`")
         msg_lines.append(f"• 현재: `{f(current_price)}`")
 
