@@ -294,7 +294,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 # 신규 진입
                 self.active_positions[symbol]["cum_pnl"] = Decimal("0")
 
-                lines.append(f"⚡ *신규 진입 ({pos_side})*")
+                lines.append(f"🍀 *신규 진입 ({pos_side})*")
                 lines.append("")
                 lines.append(f"• *종목*: {side_color} `{symbol}`")
                 lines.append("──────────────")
