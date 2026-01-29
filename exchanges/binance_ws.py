@@ -199,7 +199,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                     f"❎ 전체 청산 ({pos_side})\n\n"
                     f"{side_color} 종목: {symbol}\n"
                     f"📦 수량: {total_qty:,}\n"
-                    f"💲 가격: {exec_avg_price:,}\n"
+                    f"💲 가격: {exec_avg_price:,.8f}\n"
                     f"{pnl_icon} 손익: {total_pnl:,.2f} USDT\n"
                     f"🕒 시간: {now_str}"
                 )
@@ -209,7 +209,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                     f"{side_color} 종목: {symbol}\n"
                     f"📦 수량: {total_qty:,}\n"
                     f"📦 남은 수량: {final_amt:,}\n"
-                    f"💲 가격: {exec_avg_price:,}\n"
+                    f"💲 가격: {exec_avg_price:,.8f}\n"
                     f"{pnl_icon} 손익: {total_pnl:,.2f} USDT\n"
                     f"🕒 시간: {now_str}"
                 )
