@@ -19,33 +19,43 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /pos  명령어 처리
-    메모리에 있는 active_positions를 즉시 읽어서 반환
+    /pos 명령어 처리
+    현재가 조회 및 PnL 계산 포함
     """
-    positions = binance_ws.active_positions
+    # 웹소켓 클래스에 새로 만든 메서드 호출
+    positions_info = await binance_ws.get_positions_with_pnl()
 
-    if not positions:
+    if not positions_info:
         await update.message.reply_text("🤷‍♂️ 현재 보유 중인 포지션이 없습니다.")
         return
 
     msg_lines = ["📊 *현재 포지션 현황*"]
 
-    for symbol, data in positions.items():
-        amt = data["amt"] * BinanceWebSocket.SIMULATION_MULTIPLIER
-        price = data["price"]
+    total_pnl = Decimal("0")
 
-        # 수량이 0이면(청산됨) 건너뛰기
-        if amt == Decimal("0"):
-            continue
+    for p in positions_info:
+        symbol = p["symbol"]
+        side = p["side"]
+        amt = p["amount"]
+        entry_price = p["entry_price"]
+        current_price = p["current_price"]
+        pnl = p["pnl"]
+        roe = p["roe"]
 
-        side = "🟢 롱" if amt > 0 else "🔴 숏"
+        total_pnl += pnl
+
+        # 이모지 결정 (수익이면 축하, 손실이면 눈물)
+        pnl_icon = "🔥" if pnl > 0 else "💧"
+
         msg_lines.append(f"\n*{symbol}* {side}")
-        msg_lines.append(f"• 수량: `{amt}`")
-        msg_lines.append(f"• 평단: `{f(price)}`")
+        msg_lines.append(f"• 수량: `{amt:,}`")  # 천단위 콤마
+        msg_lines.append(f"• 평단: `{f(entry_price)}`")
+        msg_lines.append(f"• 현재: `{f(current_price)}`")
+        msg_lines.append(f"• 손익: {pnl_icon} `{pnl:,.2f}` USDT ({roe:+.2f}%)")
 
-    if len(msg_lines) == 1:
-        await update.message.reply_text("🤷‍♂️ 현재 보유 중인 포지션이 없습니다.")
-        return
+    # 총 손익 표시
+    total_icon = "💰" if total_pnl >= 0 else "💸"
+    msg_lines.append(f"\n{total_icon} *총 미실현 손익:* `{total_pnl:,.2f}` USDT")
 
     await update.message.reply_text("\n".join(msg_lines), parse_mode="Markdown")
 

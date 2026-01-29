@@ -141,6 +141,70 @@ class BinanceWebSocket(ExchangeWebSocket):
             "is_reduce": is_reduce,
         }
 
+    async def get_positions_with_pnl(self):
+        """
+        현재 활성화된 포지션에 대해 현재가를 조회하여 PnL을 계산해 반환
+        """
+        if not self.active_positions or not self.client:
+            return []
+
+        # 1. 활성화된 포지션 심볼 목록 추출
+        active_symbols = [
+            s
+            for s, data in self.active_positions.items()
+            if data["amt"] != Decimal("0")
+        ]
+
+        if not active_symbols:
+            return []
+
+        # 2. 바이낸스 API로 현재가 조회 (한 번에 모든 티커 조회 후 필터링이 효율적)
+        # futures_symbol_ticker()는 인자 없이 호출하면 모든 심볼의 가격을 가져옵니다.
+        try:
+            all_tickers = await self.client.futures_symbol_ticker()
+            # 검색 속도를 위해 {symbol: price} 딕셔너리로 변환
+            price_map = {t["symbol"]: Decimal(str(t["price"])) for t in all_tickers}
+        except Exception as e:
+            logging.error(f"가격 조회 실패: {e}")
+            return []
+
+        results = []
+
+        # 3. 각 포지션별 PnL 계산
+        for symbol in active_symbols:
+            data = self.active_positions[symbol]
+            entry_price = data["price"]
+            raw_amt = data["amt"]  # 거래소 기준 원본 수량
+
+            # 시뮬레이션 배율 적용된 수량
+            sim_amt = raw_amt * self.SIMULATION_MULTIPLIER
+
+            # 현재가 가져오기 (없으면 진입가로 대체하여 PnL 0으로 처리)
+            current_price = price_map.get(symbol, entry_price)
+
+            # 미실현 손익 계산 공식: (현재가 - 평단가) * 수량
+            # 롱(양수): 가격 오르면 이득, 숏(음수): 가격 내리면 이득 (수량 부호 덕분에 공식 하나로 통일됨)
+            pnl = (current_price - entry_price) * sim_amt
+
+            # 수익률(ROE) 계산: (손익 / (평단 * 절대값수량)) * 100
+            # 레버리지 미반영된 순수 등락률입니다.
+            entry_value = entry_price * abs(sim_amt)
+            roe = (pnl / entry_value) * 100 if entry_value > 0 else Decimal("0")
+
+            results.append(
+                {
+                    "symbol": symbol,
+                    "side": "🟢 롱" if raw_amt > 0 else "🔴 숏",
+                    "amount": sim_amt,
+                    "entry_price": entry_price,
+                    "current_price": current_price,
+                    "pnl": pnl,
+                    "roe": roe,
+                }
+            )
+
+        return results
+
     async def _flush_buffer(self, symbol):
         """0.5초 대기 후 데이터를 취합해서 알림 전송"""
 
