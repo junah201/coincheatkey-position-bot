@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections import defaultdict
+from datetime import datetime
 from decimal import Decimal
 
 from binance import AsyncClient, BinanceSocketManager
@@ -106,9 +107,10 @@ class BinanceWebSocket(ExchangeWebSocket):
         """
         주문 목록을 받아 집계된 데이터를 반환하는 순수 함수
         """
-        total_qty = Decimal("0")
-        total_val = Decimal("0")
-        total_pnl = Decimal("0")
+        total_qty = Decimal("0")  # 총 체결 수량
+        total_val = Decimal("0")  # 총 체결 금액 (평단 계산용)
+        total_pnl = Decimal("0")  # 총 실현 손익
+        total_fee = Decimal("0")  # 총 수수료
 
         # 첫 주문의 Side를 기준 (보통 버퍼 내 주문은 같은 방향이라고 가정)
         side = orders[0]["S"]
@@ -119,10 +121,12 @@ class BinanceWebSocket(ExchangeWebSocket):
             q = Decimal(str(o.get("l", "0"))) * multiplier
             p = Decimal(str(o.get("ap", "0"))) * multiplier
             rp = Decimal(str(o.get("rp", "0"))) * multiplier
+            fee = Decimal(str(o.get("n", "0"))) * multiplier
 
             total_qty += q
             total_val += p * q
             total_pnl += rp
+            total_fee += fee
 
         # 실행 평단가 계산 (0으로 나누기 방지)
         exec_avg_price = total_val / total_qty if total_qty > 0 else Decimal("0")
@@ -130,6 +134,7 @@ class BinanceWebSocket(ExchangeWebSocket):
         return {
             "total_qty": total_qty,
             "total_pnl": total_pnl,
+            "total_fee": total_fee,
             "exec_avg_price": exec_avg_price,
             "side": side,
             "is_reduce": is_reduce,
@@ -151,6 +156,7 @@ class BinanceWebSocket(ExchangeWebSocket):
 
         total_qty = agg_data["total_qty"]
         total_pnl = agg_data["total_pnl"]
+        total_fee = agg_data["total_fee"]
         exec_avg_price = agg_data["exec_avg_price"]
         side = agg_data["side"]
         is_reduce = agg_data["is_reduce"]
@@ -163,54 +169,80 @@ class BinanceWebSocket(ExchangeWebSocket):
         final_amt = abs(wallet["amt"])
 
         # 포지션 방향 및 색상 결정
-        if total_pnl == 0:
-            pos_type = "롱" if side == "BUY" else "숏"
-            color = "🟢" if side == "BUY" else "🔴"
+        if is_reduce or total_pnl != 0:
+            # 청산 주문의 경우: BUY면 숏을 청산한 것, SELL이면 롱을 청산한 것
+            pos_side = "SHORT" if side == "BUY" else "LONG"
+            side_color = "🔴" if pos_side == "SHORT" else "🟢"  # 숏은 빨강, 롱은 초록
         else:
-            pos_type = "롱" if side == "SELL" else "숏"
-            color = ""
+            # 진입 주문의 경우: BUY면 롱 진입, SELL이면 숏 진입
+            pos_side = "LONG" if side == "BUY" else "SHORT"
+            side_color = "🟢" if pos_side == "LONG" else "🔴"
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S KST")
 
         msg = ""
 
         # =========================================================
-        # Case A: 청산 (익절 / 손절)
+        # Case A: 청산 (익절 / 손절 / 본절)
         # =========================================================
         if total_pnl != Decimal("0") or is_reduce:
-            if total_pnl > 0:
-                icon = "💰"
-                pnl_type = "익절"
-            elif total_pnl < 0:
-                icon = "💧"
-                pnl_type = "손절"
-            else:
-                icon = "⚖️"
-                pnl_type = "청산"
-
+            # 전체 청산 vs 부분 청산
             if final_amt < Decimal("0.00001"):
-                # 전량 청산일 때
-                trade_type = f"{pnl_type}"
-                detail_txt = f"/ 수량: {total_qty:,.4f} (전량 청산)"
+                header_title = "전체 청산"
+                header_icon = "❎"  # 이미지의 청산 아이콘
             else:
-                # 부분 청산일 때
-                trade_type = f"부분 {pnl_type}"
-                detail_txt = f"/ 수량: {total_qty:,.4f} / 남은수량: {final_amt:,.4f}"
+                header_title = "부분 청산"
+                header_icon = "⚠️"
 
-            msg = f"{icon} [{trade_type}] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} {detail_txt}\n"
-            msg += f"확정손익: ${total_pnl:,.2f}"
+            # 실현손익 계산 (순수익 = PnL + Fee) *Fee가 음수라고 가정
+            net_pnl = total_pnl + total_fee
+
+            # 손익 아이콘
+            if net_pnl > 0:
+                pnl_icon = "🎉"
+            elif net_pnl < 0:
+                pnl_icon = "💧"
+            else:
+                pnl_icon = "⚖️"
+
+            msg = f"""
+                {header_icon} {header_title} ({pos_side})\n\n
+                {side_color} 종목: {symbol}\n
+                📦 수량: {total_qty:,.4f}\n
+                💲 가격: {exec_avg_price:,.2f}\n
+                {pnl_icon} 실현손익(해당 체결): {net_pnl:,.4f} USDT\n
+                - PnL: {total_pnl:,.4f} / Fee: {total_fee:,.4f}\n
+                🕒 시간: {now_str}
+                """
 
         # =========================================================
-        # Case B: 진입 (신규 / 추가 매수)
+        # Case B: 진입 (신규 / 추가)
         # =========================================================
         else:
             prev_amt = final_amt - total_qty
 
             if prev_amt < Decimal("0.00001"):
-                # 신규 진입
-                msg = f"{color}[진입] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} / 수량: {total_qty:,.4f}"
+                header_title = "신규 진입"  # 혹은 이미지처럼 "신규/추가 진입" 통일
+                msg = f"""
+                    💥 {header_title} ({pos_side})\n\n
+                    {side_color} 종목: {symbol}\n
+                    📦 수량: {total_qty:,.4f}\n
+                    💲 가격: {exec_avg_price:,.2f}\n
+                    💸 수수료: {total_fee:,.4f} USDT\n
+                    🕒 시간: {now_str}
+                    """
             else:
-                # 추가 매수 (물타기)
-                msg = f"{color}[추가매수] {symbol} {pos_type} / 평단: {exec_avg_price:,.4f} / 수량: {total_qty:,.4f}\n"
-                msg += f"➡️ 최종평단: {final_ep:,.4f} / 누적수량: {final_amt:,.4f}"
+                header_title = "추가 진입"  # 물타기/불타기
+                msg = f"""
+                    💥 {header_title} ({pos_side})\n\n
+                    {side_color} 종목: {symbol}\n
+                    📦 수량: {total_qty:,.4f}\n
+                    💲 가격: {exec_avg_price:,.2f}\n
+                    💸 수수료: {total_fee:,.4f} USDT\n
+                    💲 최종 평단가: {final_ep:,.4f} USDT\n
+                    📦 최종 수량: {final_amt:,.4f}\n
+                    🕒 시간: {now_str}
+                    """
 
         print(msg)
         print("-" * 30)
