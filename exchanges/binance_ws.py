@@ -254,12 +254,11 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append("")
                 lines.append(f"• *종목*:{side_color} `{symbol}`")
                 lines.append("──────────────")
-                lines.append(f"• *정리수량*:`{total_qty:,}`")
-                lines.append(f"• *종료가격*:`{f(exec_avg_price)}`")
-                lines.append(f"• *마지막 손익*:`{f(total_pnl, '0.001')}` USDT")
+                lines.append(f"• *정리수량*: `{total_qty:,}`")
+                lines.append(f"• *종료가격*: `{f(exec_avg_price)}`")
+                lines.append(f"• *마지막 손익*: `{f(total_pnl, '0.001')}` USDT")
                 lines.append("──────────────")
-                lines.append(f"💰*최종 확정 이익*:`{f(cumulative_pnl, '0.001')}` USDT")
-
+                lines.append(f"💰*최종 확정 이익*: `{f(cumulative_pnl, '0.001')}` USDT")
                 # 리셋
                 self.active_positions[symbol]["cum_pnl"] = Decimal("0")
 
@@ -272,9 +271,9 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append("")
                 lines.append(f"• *종목*:{side_color} `{symbol}`")
                 lines.append("──────────────")
-                lines.append(f"• *정리수량*:`{total_qty:,}`")
-                lines.append(f"• *남은수량*:`{final_amt:,}`")
-                lines.append(f"• *체결가격*:`{f(exec_avg_price)}`")
+                lines.append(f"• *정리수량*: `{total_qty:,}`")
+                lines.append(f"• *남은수량*: `{final_amt:,}`")
+                lines.append(f"• *체결가격*: `{f(exec_avg_price)}`")
                 lines.append("──────────────")
                 lines.append(f"• *이번손익*: {pnl_icon} `{f(total_pnl, '0.001')}` USDT")
                 lines.append(

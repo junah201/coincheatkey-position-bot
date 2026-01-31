@@ -61,9 +61,9 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r_icon = "💰" if realized_pnl > 0 else "💸"
 
         msg_lines.append(f"\n*{symbol}* {side}")
-        msg_lines.append(f"• 수량:`{f(amt)}`")
-        msg_lines.append(f"• 평단:`{f(entry_price)}`")
-        msg_lines.append(f"• 현재:`{f(current_price)}`")
+        msg_lines.append(f"• 수량: `{f(amt)}`")
+        msg_lines.append(f"• 평단: `{f(entry_price)}`")
+        msg_lines.append(f"• 현재: `{f(current_price)}`")
 
         # 🔥 [핵심] 실현 손익이 있을 때만 한 줄 더 보여줌
         if realized_pnl != Decimal("0"):
@@ -71,7 +71,7 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• 실현손익:{r_icon} `{f(realized_pnl, '0.001')}` USDT (확정)"
             )
 
-        msg_lines.append(f"• 평가손익: {u_icon}`{f(pnl, '0.001')}` USDT")
+        msg_lines.append(f"• 평가손익:{u_icon}`{f(pnl, '0.001')}` USDT")
 
     # 하단 요약 (구분선 추가)
     msg_lines.append("\n──────────────")
@@ -86,7 +86,7 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 총 평가 손익 표시
     total_u_icon = "🔥" if total_unrealized_pnl >= 0 else "💧"
     msg_lines.append(
-        f"{total_u_icon} *총 평가손익:* `{f(total_unrealized_pnl, '0.001')}` USDT"
+        f"{total_u_icon}*총 평가손익:* `{f(total_unrealized_pnl, '0.001')}` USDT"
     )
 
     await update.message.reply_text("\n".join(msg_lines), parse_mode="Markdown")
