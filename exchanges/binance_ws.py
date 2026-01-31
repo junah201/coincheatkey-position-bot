@@ -240,7 +240,7 @@ class BinanceWebSocket(ExchangeWebSocket):
             pos_side = "LONG" if side == "BUY" else "SHORT"
             side_color = "🟢" if pos_side == "LONG" else "🔴"
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S KST")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # 메시지 작성을 위한 리스트 (나중에 join으로 합침)
         lines = []
