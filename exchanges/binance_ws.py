@@ -267,12 +267,19 @@ class BinanceWebSocket(ExchangeWebSocket):
                 pnl_icon = "🎉" if total_pnl > 0 else "💧"
                 cum_icon = "💰" if cumulative_pnl > 0 else "💸"
 
+                # 청산한 비율 퍼센트 계산
+                liquidation_ratio = (total_qty / (total_qty + final_amt)) * Decimal(
+                    "100"
+                )
+
                 lines.append(f"⚠️*부분 청산 ({pos_side})*")
                 lines.append("")
                 lines.append(f"• *종목*:{side_color} `{symbol}`")
                 lines.append("──────────────")
                 lines.append(f"• *전수량*: `{(total_qty + final_amt):,}`")
-                lines.append(f"• *정리수량*: `{total_qty:,}`")
+                lines.append(
+                    f"• *정리수량*: `{total_qty:,}` ({f(liquidation_ratio, '0.01')}%)"
+                )
                 lines.append(f"• *남은수량*: `{final_amt:,}`")
                 lines.append(f"• *체결가격*: `{f(exec_avg_price)}`")
                 lines.append("──────────────")
