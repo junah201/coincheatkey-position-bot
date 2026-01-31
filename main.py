@@ -2,7 +2,11 @@ import asyncio
 from decimal import Decimal
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+)
 
 from exchanges.binance_ws import BinanceWebSocket
 from utils import get_required_env
@@ -47,7 +51,6 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         realized_pnl = p.get(
             "realized_pnl", Decimal("0")
         )  # 실현 손익 (Realized) - 새로 추가된 부분
-        roe = p["roe"]
 
         # 합계 누적
         total_unrealized_pnl += pnl
@@ -58,15 +61,17 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r_icon = "💰" if realized_pnl > 0 else "💸"
 
         msg_lines.append(f"\n*{symbol}* {side}")
-        msg_lines.append(f"• 수량: `{f(amt)}`")
-        msg_lines.append(f"• 평단: `{f(entry_price)}`")
-        msg_lines.append(f"• 현재: `{f(current_price)}`")
+        msg_lines.append(f"• 수량:`{f(amt)}`")
+        msg_lines.append(f"• 평단:`{f(entry_price)}`")
+        msg_lines.append(f"• 현재:`{f(current_price)}`")
 
         # 🔥 [핵심] 실현 손익이 있을 때만 한 줄 더 보여줌
         if realized_pnl != Decimal("0"):
-            msg_lines.append(f"• 실현손익: {r_icon} `{realized_pnl:,.2f}` USDT (확정)")
+            msg_lines.append(
+                f"• 실현손익:{r_icon} `{f(realized_pnl, '0.001')}` USDT (확정)"
+            )
 
-        msg_lines.append(f"• 평가손익: {u_icon} `{pnl:,.2f}` USDT ({roe:+.2f}%)")
+        msg_lines.append(f"• 평가손익: {u_icon}`{f(pnl, '0.001')}` USDT")
 
     # 하단 요약 (구분선 추가)
     msg_lines.append("\n──────────────")
@@ -75,13 +80,13 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if total_realized_pnl != Decimal("0"):
         total_r_icon = "💰" if total_realized_pnl > 0 else "💸"
         msg_lines.append(
-            f"{total_r_icon} *총 실현 손익:* `{total_realized_pnl:,.2f}` USDT"
+            f"{total_r_icon} *총 실현손익:* `{f(total_realized_pnl, '0.001')}` USDT"
         )
 
     # 총 평가 손익 표시
     total_u_icon = "🔥" if total_unrealized_pnl >= 0 else "💧"
     msg_lines.append(
-        f"{total_u_icon} *총 평가 손익:* `{total_unrealized_pnl:,.2f}` USDT"
+        f"{total_u_icon} *총 평가손익:* `{f(total_unrealized_pnl, '0.001')}` USDT"
     )
 
     await update.message.reply_text("\n".join(msg_lines), parse_mode="Markdown")

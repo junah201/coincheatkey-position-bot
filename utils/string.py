@@ -1,7 +1,7 @@
 from decimal import ROUND_DOWN, Decimal
 
 
-def f(value: Decimal) -> str:
+def f(value: Decimal, quantize_str: str = "0.00000001") -> str:
     """
     Decimal을 받아서 예쁜 문자열로 변환하는 함수
     1. 소수점 8자리 이하 버림 (ROUND_DOWN)
@@ -14,7 +14,7 @@ def f(value: Decimal) -> str:
     # 1. 소수점 8자리까지만 남기고 버림 (Truncate)
     # 예: 10.123456789 -> 10.12345678
     # 예: 10.5 -> 10.50000000 (일단 0이 채워짐)
-    quantized = value.quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+    quantized = value.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
 
     # 2. 고정 소수점 문자열로 변환 ('f' 포맷은 과학적 표기법 1E-8 등을 방지함)
     s = format(quantized, "f")

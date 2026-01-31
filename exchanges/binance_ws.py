@@ -128,7 +128,6 @@ class BinanceWebSocket(ExchangeWebSocket):
         for o in orders:
             q = Decimal(str(o.get("l", "0"))) * multiplier
             p = Decimal(str(o.get("ap", "0")))  # 체결 가격
-            # Binance는 'rp' 키에 실현 손익을 줌
             rp = Decimal(str(o.get("rp", "0"))) * multiplier
             fee = Decimal(str(o.get("n", "0"))) * multiplier
 
@@ -251,19 +250,15 @@ class BinanceWebSocket(ExchangeWebSocket):
         if total_pnl != Decimal("0") or is_reduce:
             # 1. 전체 청산
             if final_amt < Decimal("0.00001"):
-                cycle_icon = "💰" if cumulative_pnl > 0 else "💸"
-
-                lines.append(f"❎ *전체 청산 ({pos_side})*")
+                lines.append(f"💵 *전체 청산 ({pos_side})*")
                 lines.append("")
-                lines.append(f"• *종목*: {side_color} `{symbol}`")
+                lines.append(f"• *종목*:{side_color} `{symbol}`")
                 lines.append("──────────────")
-                lines.append(f"• *정리수량*: `{total_qty:,}`")
-                lines.append(f"• *종료가격*: `{f(exec_avg_price)}`")
-                lines.append(f"• *마지막 손익*: `{total_pnl:,.2f}` USDT")
+                lines.append(f"• *정리수량*:`{total_qty:,}`")
+                lines.append(f"• *종료가격*:`{f(exec_avg_price)}`")
+                lines.append(f"• *마지막 손익*:`{f(total_pnl, '0.001')}` USDT")
                 lines.append("──────────────")
-                lines.append(
-                    f"{cycle_icon} *최종 확정 이익*: `{cumulative_pnl:,.2f}` USDT"
-                )
+                lines.append(f"💰*최종 확정 이익*:`{f(cumulative_pnl, '0.001')}` USDT")
 
                 # 리셋
                 self.active_positions[symbol]["cum_pnl"] = Decimal("0")
@@ -273,17 +268,18 @@ class BinanceWebSocket(ExchangeWebSocket):
                 pnl_icon = "🎉" if total_pnl > 0 else "💧"
                 cum_icon = "💰" if cumulative_pnl > 0 else "💸"
 
-                lines.append(f"⚠️ *부분 청산 ({pos_side})*")
+                lines.append(f"⚠️*부분 청산 ({pos_side})*")
                 lines.append("")
-                lines.append(f"• *종목*: {side_color} `{symbol}`")
+                lines.append(f"• *종목*:{side_color} `{symbol}`")
                 lines.append("──────────────")
-                lines.append(f"• *정리수량*: `{total_qty:,}`")
-                lines.append(f"• *남은수량*: `{final_amt:,}`")
-                lines.append(f"• *체결가격*: `{f(exec_avg_price)}`")
+                lines.append(f"• *정리수량*:`{total_qty:,}`")
+                lines.append(f"• *남은수량*:`{final_amt:,}`")
+                lines.append(f"• *체결가격*:`{f(exec_avg_price)}`")
                 lines.append("──────────────")
-                lines.append(f"• *이번손익*: {pnl_icon} `{total_pnl:,.2f}` USDT")
-                lines.append(f"• *누적실현*: {cum_icon} `{cumulative_pnl:,.2f}` USDT")
-
+                lines.append(f"• *이번손익*: {pnl_icon} `{f(total_pnl, '0.001')}` USDT")
+                lines.append(
+                    f"• *누적실현*: {cum_icon} `{f(cumulative_pnl, '0.001')}` USDT"
+                )
         # =========================================================
         # Case B: 진입 (신규 / 추가)
         # =========================================================
