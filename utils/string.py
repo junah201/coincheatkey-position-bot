@@ -29,3 +29,10 @@ def f(value: Decimal, quantize_str: str = "0.00000001") -> str:
         return f"{int(integer_part):,}.{decimal_part}"
     else:
         return f"{int(s):,}"
+
+
+def price_f(value: Decimal, symbol: str):
+    if symbol in ["BTCUSDT", "ETHUSDT"]:
+        return f(value, "0.01")
+
+    return f(value)

@@ -8,7 +8,7 @@ from binance import AsyncClient, BinanceSocketManager
 
 from exchanges.base import ExchangeWebSocket
 from utils import get_required_env
-from utils.string import f
+from utils.string import f, price_f
 from utils.telegram import send_telegram_message
 
 
@@ -294,7 +294,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append(f"• *종목*: {side_color} `{symbol}`")
                 lines.append("──────────────")
                 lines.append(f"• *진입수량*: `{f(total_qty)}`")
-                lines.append(f"• *진입가격*: `{f(exec_avg_price)}`")
+                lines.append(f"• *진입가격*: `{price_f(exec_avg_price, symbol)}`")
             else:
                 # 추가 진입 (물타기/불타기)
                 lines.append(f"🌊 *추가 진입 ({pos_side})*")
@@ -302,8 +302,8 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append(f"• *종목*: {side_color} `{symbol}`")
                 lines.append("──────────────")
                 lines.append(f"• *추가수량*: `{f(total_qty)}`")
-                lines.append(f"• *추매가격*: `{f(exec_avg_price)}`")
-                lines.append(f"• *최종평단*: `{f(final_ep)}`")
+                lines.append(f"• *추매가격*: `{price_f(exec_avg_price, symbol)}`")
+                lines.append(f"• *최종평단*: `{price_f(final_ep, symbol)}`")
                 lines.append(f"• *보유수량*: `{f(final_amt)}`")
 
         # 공통 하단 (시간)
