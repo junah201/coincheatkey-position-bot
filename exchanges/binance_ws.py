@@ -89,10 +89,9 @@ class BinanceWebSocket(ExchangeWebSocket):
             amt = Decimal(str(p["pa"]))  # 포지션 수량
             ep = Decimal(str(p["ep"]))  # 최신 평단가
 
-            # [변경 2] 딕셔너리를 통째로 덮어쓰지 않고, 수량과 평단만 업데이트
-            # (이유: cum_pnl 기록을 유지하기 위함)
             self.active_positions[symbol]["amt"] = amt
-            self.active_positions[symbol]["price"] = ep
+            if amt != Decimal("0"):
+                self.active_positions[symbol]["price"] = ep
 
     def _buffer_order(self, msg):
         """ORDER_TRADE_UPDATE 이벤트 처리"""
@@ -119,8 +118,6 @@ class BinanceWebSocket(ExchangeWebSocket):
         """
         total_qty = Decimal("0")  # 총 체결 수량
         total_val = Decimal("0")  # 총 체결 금액 (평단 계산용)
-        total_pnl = Decimal("0")  # 총 실현 손익
-        total_fee = Decimal("0")  # 총 수수료
 
         side = orders[0]["S"]
         is_reduce = any(o.get("R", False) for o in orders)
@@ -128,21 +125,15 @@ class BinanceWebSocket(ExchangeWebSocket):
         for o in orders:
             q = Decimal(str(o.get("l", "0"))) * multiplier
             p = Decimal(str(o.get("ap", "0")))  # 체결 가격
-            rp = Decimal(str(o.get("rp", "0"))) * multiplier
-            fee = Decimal(str(o.get("n", "0"))) * multiplier
 
             total_qty += q
             total_val += p * q
-            total_pnl += rp
-            total_fee += fee
 
         # 실행 평단가 계산 (0으로 나누기 방지)
         exec_avg_price = total_val / total_qty if total_qty > 0 else Decimal("0")
 
         return {
             "total_qty": total_qty,
-            "total_pnl": total_pnl,
-            "total_fee": total_fee,
             "exec_avg_price": exec_avg_price,
             "side": side,
             "is_reduce": is_reduce,
@@ -212,7 +203,6 @@ class BinanceWebSocket(ExchangeWebSocket):
         agg_data = self.aggregate_order_buffer(orders, self.SIMULATION_MULTIPLIER)
 
         total_qty = agg_data["total_qty"]
-        total_pnl = agg_data["total_pnl"]
         exec_avg_price = agg_data["exec_avg_price"]
         side = agg_data["side"]
         is_reduce = agg_data["is_reduce"]
@@ -222,17 +212,29 @@ class BinanceWebSocket(ExchangeWebSocket):
             symbol,
             {"amt": Decimal("0"), "price": Decimal("0"), "cum_pnl": Decimal("0")},
         )
-        final_ep = wallet["price"]
+        entry_price = wallet["price"]
         final_amt = abs(wallet["amt"]) * self.SIMULATION_MULTIPLIER
 
+        calc_pnl = Decimal("0")
+        if is_reduce and entry_price > 0:
+            # 1. 숏 포지션 청산 (BUY 주문)
+            # 이익 = (진입가 - 체결가) * 수량
+            if side == "BUY":
+                calc_pnl = (entry_price - exec_avg_price) * total_qty
+
+            # 2. 롱 포지션 청산 (SELL 주문)
+            # 이익 = (체결가 - 진입가) * 수량
+            else:
+                calc_pnl = (exec_avg_price - entry_price) * total_qty
+
         # 손익 누적 (메모리 업데이트)
-        if total_pnl != 0:
-            self.active_positions[symbol]["cum_pnl"] += total_pnl
+        if calc_pnl != 0:
+            self.active_positions[symbol]["cum_pnl"] += calc_pnl
 
         cumulative_pnl = self.active_positions[symbol]["cum_pnl"]
 
         # 포지션 방향 및 색상
-        if is_reduce or total_pnl != 0:
+        if is_reduce or calc_pnl != 0:
             pos_side = "SHORT" if side == "BUY" else "LONG"
             side_color = "🔴" if pos_side == "SHORT" else "🟢"
         else:
@@ -247,7 +249,7 @@ class BinanceWebSocket(ExchangeWebSocket):
         # =========================================================
         # Case A: 청산 (익절 / 손절)
         # =========================================================
-        if total_pnl != Decimal("0") or is_reduce:
+        if calc_pnl != Decimal("0") or is_reduce:
             # 1. 전체 청산
             if final_amt < Decimal("0.00001"):
                 lines.append(f"💵 *전체 청산 ({pos_side})*")
@@ -256,7 +258,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append("──────────────")
                 lines.append(f"• *정리수량*: `{total_qty:,}`")
                 lines.append(f"• *종료가격*: `{f(exec_avg_price)}`")
-                lines.append(f"• *마지막 손익*: `{f(total_pnl, '0.001')}` USDT")
+                lines.append(f"• *마지막 손익*: `{f(calc_pnl, '0.001')}` USDT")
                 lines.append("──────────────")
                 lines.append(f"💰*최종 확정이익*: `{f(cumulative_pnl, '0.001')}` USDT")
                 # 리셋
@@ -264,7 +266,7 @@ class BinanceWebSocket(ExchangeWebSocket):
 
             # 2. 부분 청산
             else:
-                pnl_icon = "🎉" if total_pnl > 0 else "💧"
+                pnl_icon = "🎉" if calc_pnl > 0 else "💧"
                 cum_icon = "💰" if cumulative_pnl > 0 else "💸"
 
                 # 청산한 비율 퍼센트 계산
@@ -283,7 +285,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append(f"• *남은수량*: `{final_amt:,}`")
                 lines.append(f"• *체결가격*: `{f(exec_avg_price)}`")
                 lines.append("──────────────")
-                lines.append(f"• *이번손익*: {pnl_icon} `{f(total_pnl, '0.001')}` USDT")
+                lines.append(f"• *이번손익*: {pnl_icon} `{f(calc_pnl, '0.001')}` USDT")
                 lines.append(
                     f"• *누적실현*: {cum_icon} `{f(cumulative_pnl, '0.001')}` USDT"
                 )
@@ -311,7 +313,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 lines.append("──────────────")
                 lines.append(f"• *추가수량*: `{f(total_qty)}`")
                 lines.append(f"• *추매가격*: `{price_f(exec_avg_price, symbol)}`")
-                lines.append(f"• *최종평단*: `{price_f(final_ep, symbol)}`")
+                lines.append(f"• *최종평단*: `{price_f(entry_price, symbol)}`")
                 lines.append(f"• *보유수량*: `{f(final_amt)}`")
 
         # 공통 하단 (시간)
