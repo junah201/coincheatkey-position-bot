@@ -24,9 +24,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /pos 명령어 처리
-    [실현 손익]과 [평가 손익]을 동시에 표시
+    [실현 손익], [평가 손익], [레버리지], [시드 비중]을 모두 표시
     """
-    # 1. 포지션 정보 가져오기 (여기서 realized_pnl도 같이 옴)
+    # 1. 포지션 정보 가져오기 (레버리지, 비중 포함)
     positions_info = await binance_ws.get_positions_with_pnl()
 
     if not positions_info:
@@ -38,6 +38,7 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 합계 변수 분리
     total_unrealized_pnl = Decimal("0")
     total_realized_pnl = Decimal("0")
+    total_seed_usage = Decimal("0")  # [추가] 총 시드 사용 비중
 
     for p in positions_info:
         symbol = p["symbol"]
@@ -48,20 +49,26 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # 데이터 추출
         pnl = p["pnl"]  # 평가 손익 (Unrealized)
-        realized_pnl = p.get(
-            "realized_pnl", Decimal("0")
-        )  # 실현 손익 (Realized) - 새로 추가된 부분
+        realized_pnl = p.get("realized_pnl", Decimal("0"))  # 실현 손익 (Realized)
+
+        # [추가] 레버리지 및 시드 비중 추출
+        leverage = p.get("leverage", Decimal("1"))
+        seed_usage_percent = p.get("seed_usage_percent", Decimal("0"))
 
         # 합계 누적
         total_unrealized_pnl += pnl
         total_realized_pnl += realized_pnl
+        total_seed_usage += seed_usage_percent  # 총 비중 누적
 
         # 이모지 결정
         u_icon = "🔥" if pnl > 0 else "💧"
         r_icon = "💰" if realized_pnl > 0 else "💸"
 
-        msg_lines.append(f"\n*{symbol}* {side}")
+        msg_lines.append(f"\n*{symbol} ({leverage}x)* {side}")
         msg_lines.append(f"• 수량: `{f(amt)}`")
+        msg_lines.append(
+            f"• 비중: `{f(seed_usage_percent, '0.01')}%`"
+        )  # [추가] 비중 표시
         msg_lines.append(f"• 평단: `{f(entry_price)}`")
         msg_lines.append(f"• 현재: `{f(current_price)}`")
 
@@ -75,6 +82,10 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 하단 요약 (구분선 추가)
     msg_lines.append("\n──────────────")
+
+    # [추가] 총 시드 사용 비중 표시 (0% 초과일 때만)
+    if total_seed_usage > Decimal("0"):
+        msg_lines.append(f"⚖️ *총 시드비중:* `{f(total_seed_usage, '0.01')}%`")
 
     # 총 실현 손익이 있으면 표시
     if total_realized_pnl != Decimal("0"):

@@ -23,7 +23,8 @@ class BinanceWebSocket(ExchangeWebSocket):
         self.client = None
         self.bm = None
 
-        # [변경 1] 누적 손익(cum_pnl) 필드 추가
+        self.wallet_balance = Decimal("0")
+        self.leverage_map = defaultdict(lambda: Decimal("1"))
         self.active_positions = defaultdict(
             lambda: {
                 "amt": Decimal("0"),
@@ -36,21 +37,32 @@ class BinanceWebSocket(ExchangeWebSocket):
         self.flush_tasks = {}
 
     async def _sync_initial_positions(self):
-        """봇 시작 시 현재 포지션 상태 동기화"""
+        """봇 시작 시 현재 포지션 상태, 지갑 잔고, 레버리지 동기화"""
         try:
+            # 1. 잔고 및 평단가 동기화
             account_info = await self.client.futures_account()
+            self.wallet_balance = Decimal(
+                str(account_info.get("totalWalletBalance", "0"))
+            )
+
             for position in account_info["positions"]:
                 symbol = position["symbol"]
+                self.leverage_map[symbol] = Decimal(str(position["leverage"]))
                 amt = Decimal(str(position["positionAmt"]))
                 ep = Decimal(str(position["entryPrice"]))
 
                 if amt != Decimal("0"):
-                    # 초기화 시에는 과거 내역을 모르니 cum_pnl은 0으로 시작
                     self.active_positions[symbol].update({"amt": amt, "price": ep})
-        except Exception:
-            pass
+
+                logging.info(
+                    f"초기화 - {symbol}: 레버리지 {self.leverage_map[symbol]}x"
+                )
+
+        except Exception as e:
+            logging.error(f"초기화 에러: {e}")
 
     async def start(self):
+        logging.info("바이낸스 웹소켓 시작")
         self.client = await AsyncClient.create(self.api_key, self.secret_key)
         await self._sync_initial_positions()
 
@@ -77,6 +89,8 @@ class BinanceWebSocket(ExchangeWebSocket):
             # 2. 주문 체결이 오면 버퍼에 넣고 타이머 시작
             elif event_type == "ORDER_TRADE_UPDATE":
                 self._buffer_order(msg)
+            elif event_type == "ACCOUNT_CONFIG_UPDATE":
+                self._update_leverage(msg)
 
         except Exception as e:
             logging.error(f"처리 중 에러: {e}")
@@ -84,6 +98,11 @@ class BinanceWebSocket(ExchangeWebSocket):
     def _update_wallet(self, msg):
         """ACCOUNT_UPDATE 이벤트 처리: 지갑 정보 최신화"""
         data = msg.get("a", {})
+
+        for b in data.get("B", []):
+            if b["a"] == "USDT":
+                self.wallet_balance = Decimal(str(b["wb"]))
+
         for p in data.get("P", []):
             symbol = p["s"]
             amt = Decimal(str(p["pa"]))  # 포지션 수량
@@ -92,6 +111,16 @@ class BinanceWebSocket(ExchangeWebSocket):
             self.active_positions[symbol]["amt"] = amt
             if amt != Decimal("0"):
                 self.active_positions[symbol]["price"] = ep
+
+    def _update_leverage(self, msg):
+        """ACCOUNT_CONFIG_UPDATE 처리: 레버리지 변경 시 메모리 갱신"""
+        # 바이낸스 ACCOUNT_CONFIG_UPDATE는 'ac' 딕셔너리 안에 레버리지 정보를 보냅니다.
+        ac = msg.get("ac")
+        if ac:
+            symbol = ac.get("s")
+            leverage = Decimal(str(ac.get("l", "1")))
+            self.leverage_map[symbol] = leverage
+            logging.info(f"⚙️ 레버리지 변경 감지: {symbol} -> {leverage}x")
 
     def _buffer_order(self, msg):
         """ORDER_TRADE_UPDATE 이벤트 처리"""
@@ -140,7 +169,7 @@ class BinanceWebSocket(ExchangeWebSocket):
         }
 
     async def get_positions_with_pnl(self):
-        """현재 포지션 + 실현손익 조회"""
+        """현재 포지션 + 실현손익 + 시드 비중 조회"""
         if not self.active_positions or not self.client:
             return []
 
@@ -153,26 +182,60 @@ class BinanceWebSocket(ExchangeWebSocket):
             return []
 
         try:
+            # 1. 현재가 조회 (PNL 계산을 위해 현재가는 여전히 API나 별도 소켓 필요)
             all_tickers = await self.client.futures_symbol_ticker()
             price_map = {t["symbol"]: Decimal(str(t["price"])) for t in all_tickers}
-        except Exception:
+
+            # [삭제됨] 기존의 futures_position_information() 호출 부분 제거!
+            # (레버리지는 self.leverage_map 메모리에서 바로 가져올 예정)
+
+        except Exception as e:
+            logging.error(f"포지션 정보 조회 에러: {e}")
             return []
 
         results = []
         for symbol in active_symbols:
             data = self.active_positions[symbol]
             entry_price = data["price"]
-            raw_amt = data["amt"]
+            raw_amt = data["amt"]  # 실제 수량
 
-            sim_amt = raw_amt * self.SIMULATION_MULTIPLIER
+            sim_amt = raw_amt * self.SIMULATION_MULTIPLIER  # 뻥튀기 된 수량
 
-            # [추가] 메모리에 누적된 실현 손익 가져오기
+            # 메모리에 누적된 실현 손익 가져오기
             realized_pnl = data.get("cum_pnl", Decimal("0"))
 
             current_price = price_map.get(symbol, entry_price)
+
+            # 미실현 PNL 및 ROE 계산
             pnl = (current_price - entry_price) * sim_amt
             entry_value = entry_price * abs(sim_amt)
             roe = (pnl / entry_value) * 100 if entry_value > 0 else Decimal("0")
+
+            # =========================================================
+            # [추가] 시드 대비 비중 계산
+            # =========================================================
+
+            # [수정] 메모리(self.leverage_map)에서 해당 심볼의 레버리지를 즉시 꺼내옴 ⚡
+            # (없을 경우를 대비해 getattr로 방어 로직 추가)
+            leverage_map = getattr(self, "leverage_map", {})
+            leverage = leverage_map.get(symbol, Decimal("1"))
+
+            # 뻥튀기 전 실제 수량을 기준으로 실제 포지션 가치 계산
+            real_position_value = entry_price * abs(raw_amt)
+
+            # 실제 들어간 내 증거금 = 총 가치 / 레버리지
+            margin_used = (
+                real_position_value / leverage if leverage > 0 else Decimal("0")
+            )
+
+            # 시드 대비 비중 (%)
+            # 이전 단계에서 추가했던 self.wallet_balance를 사용합니다.
+            wallet_balance = getattr(self, "wallet_balance", Decimal("0"))
+            seed_usage_percent = (
+                (margin_used / wallet_balance) * 100
+                if wallet_balance > 0
+                else Decimal("0")
+            )
 
             results.append(
                 {
@@ -184,6 +247,8 @@ class BinanceWebSocket(ExchangeWebSocket):
                     "pnl": pnl,  # 미실현
                     "realized_pnl": realized_pnl,  # 실현
                     "roe": roe,
+                    "leverage": leverage,  # 레버리지
+                    "seed_usage_percent": seed_usage_percent,  # 비중(%)
                 }
             )
         return results
@@ -243,6 +308,8 @@ class BinanceWebSocket(ExchangeWebSocket):
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        leverage = self.leverage_map[symbol]
+
         # 메시지 작성을 위한 리스트 (나중에 join으로 합침)
         lines = []
 
@@ -254,7 +321,7 @@ class BinanceWebSocket(ExchangeWebSocket):
             if final_amt < Decimal("0.00001"):
                 lines.append(f"💵 *전체 청산 ({pos_side})*")
                 lines.append("")
-                lines.append(f"• *종목*:{side_color} `{symbol}`")
+                lines.append(f"• *종목*:{side_color} `{symbol} ({leverage}x)`")
                 lines.append("──────────────")
                 lines.append(f"• *정리수량*: `{total_qty:,}`")
                 lines.append(f"• *종료가격*: `{f(exec_avg_price)}`")
@@ -264,7 +331,7 @@ class BinanceWebSocket(ExchangeWebSocket):
                 # 리셋
                 self.active_positions[symbol]["cum_pnl"] = Decimal("0")
 
-            # 2. 부분 청산
+            # 2. 부분 청산``
             else:
                 pnl_icon = "🎉" if calc_pnl > 0 else "💧"
                 cum_icon = "💰" if cumulative_pnl > 0 else "💸"
@@ -276,7 +343,7 @@ class BinanceWebSocket(ExchangeWebSocket):
 
                 lines.append(f"⚠️*부분 청산 ({pos_side})*")
                 lines.append("")
-                lines.append(f"• *종목*:{side_color} `{symbol}`")
+                lines.append(f"• *종목*:{side_color} `{symbol} ({leverage}x)`")
                 lines.append("──────────────")
                 lines.append(f"• *이전수량*: `{(total_qty + final_amt):,}`")
                 lines.append(
@@ -295,26 +362,48 @@ class BinanceWebSocket(ExchangeWebSocket):
         else:
             prev_amt = final_amt - total_qty
 
+            # [수정] API 호출 없이 메모리에서 바로 레버리지 가져오기 ⚡
+
+            # 봇에서 100배 뻥튀기 된 수량을 실제 수량으로 되돌림
+            actual_final_amt = final_amt / self.SIMULATION_MULTIPLIER
+
+            # 현재 포지션의 총 가치 (실제 수량 * 진입 평단가)
+            total_position_value = actual_final_amt * entry_price
+
+            # 실제 들어간 내 돈(증거금) = 총 가치 / 레버리지
+            margin_used = (
+                total_position_value / leverage if leverage > 0 else Decimal("0")
+            )
+
+            # 시드 대비 비중 (%)
+            seed_usage_percent = (
+                (margin_used / self.wallet_balance) * 100
+                if self.wallet_balance > 0
+                else Decimal("0")
+            )
+
             if prev_amt < Decimal("0.00001"):
                 # 신규 진입
                 self.active_positions[symbol]["cum_pnl"] = Decimal("0")
 
                 lines.append(f"🍀 *신규 진입 ({pos_side})*")
                 lines.append("")
-                lines.append(f"• *종목*: {side_color} `{symbol}`")
+                lines.append(f"• *종목*: {side_color} `{symbol} ({leverage}x)`")
                 lines.append("──────────────")
                 lines.append(f"• *진입수량*: `{f(total_qty)}`")
                 lines.append(f"• *진입가격*: `{price_f(exec_avg_price, symbol)}`")
+                lines.append(f"• *시드비중*: `{f(seed_usage_percent, '0.01')}%`")
             else:
                 # 추가 진입 (물타기/불타기)
                 lines.append(f"🌊 *추가 진입 ({pos_side})*")
                 lines.append("")
-                lines.append(f"• *종목*: {side_color} `{symbol}`")
+                lines.append(f"• *종목*: {side_color} `{symbol} ({leverage}x)`")
                 lines.append("──────────────")
                 lines.append(f"• *추가수량*: `{f(total_qty)}`")
                 lines.append(f"• *추매가격*: `{price_f(exec_avg_price, symbol)}`")
                 lines.append(f"• *최종평단*: `{price_f(entry_price, symbol)}`")
                 lines.append(f"• *보유수량*: `{f(final_amt)}`")
+                lines.append(f"• *총 비중*: `{f(seed_usage_percent, '0.01')}%`")
 
         # 공통 하단 (시간)
         lines.append(f"• *시간*: `{now_str}`")
