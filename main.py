@@ -13,6 +13,7 @@ from utils import get_required_env
 from utils.string import f
 
 TOKEN = get_required_env("TELEGRAM_TOKEN")
+CHAT_ID = get_required_env("TELEGRAM_CHAT_ID")
 
 binance_ws = BinanceWebSocket()
 
@@ -26,6 +27,12 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /pos 명령어 처리
     [실현 손익], [평가 손익], [레버리지], [시드 비중]을 모두 표시
     """
+    current_chat_id = update.effective_chat.id
+    if current_chat_id != CHAT_ID:
+        # 권한이 없는 곳에서 명령어를 치면 무시 (또는 안내 메시지 전송)
+        # 봇 스팸 방지를 위해 아무 대답도 하지 않고 return 하는 것을 추천합니다.
+        return
+
     # 1. 포지션 정보 가져오기 (레버리지, 비중 포함)
     positions_info = await binance_ws.get_positions_with_pnl()
 
