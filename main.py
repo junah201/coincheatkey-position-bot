@@ -28,7 +28,8 @@ async def position_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     [실현 손익], [평가 손익], [레버리지], [시드 비중]을 모두 표시
     """
     current_chat_id = update.effective_chat.id
-    if str(current_chat_id) != CHAT_ID:
+    current_topic_id = update.effective_message.message_thread_id
+    if str(current_chat_id) != CHAT_ID or str(current_topic_id) != '355034'
         # 권한이 없는 곳에서 명령어를 치면 무시 (또는 안내 메시지 전송)
         # 봇 스팸 방지를 위해 아무 대답도 하지 않고 return 하는 것을 추천합니다.
         return
